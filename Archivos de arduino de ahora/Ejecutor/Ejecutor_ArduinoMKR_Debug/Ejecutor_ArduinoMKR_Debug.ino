@@ -185,7 +185,9 @@ void setup() {
     radioOnline = false;
   } else {
     radioOnline = true;
-    radio.setPALevel(RF24_PA_MAX);
+    radio.setPayloadSize(sizeof(PaqueteControl)); // 8 bytes exactos
+    radio.enableDynamicPayloads();                // Permitir tramas dinámicas
+    radio.setPALevel(RF24_PA_LOW);               // Nivel LOW para banco de pruebas (evita saturación LNA)
     radio.setDataRate(RF24_250KBPS);
     radio.setChannel(108);
     radio.setAutoAck(true);
@@ -196,6 +198,8 @@ void setup() {
     Serial.print("   -> Chip conectado?: ");
     Serial.println(radio.isChipConnected() ? "SI (SPI Hardware OK)" : "NO (Falso contacto)");
     Serial.println("   -> Canal RF: 108 | Velocidad: 250 KBPS | AutoAck: SI");
+    Serial.println("   -> Potencia: RF24_PA_LOW (Banco de pruebas)");
+    debugPrintf("   -> Tamano de paquete: %d Bytes\n", sizeof(PaqueteControl));
     Serial.println("   -> Escuchando en Pipe 1 con direccion: \"ROVER\"");
   }
 
@@ -246,6 +250,9 @@ void loop() {
 
     actualS1 = s1_val; actualS2 = s2_val; actualS3 = s3_val; actualS4 = s4_val;
 
+    // Telemetria estructurada para la interfaz HMI: TLM:izq,der,s1,s2,s3,s4,dt,cola
+    debugPrintf("TLM:%d,%d,%d,%d,%d,%d,%lu,%d\n", paquete.traccion_izq, paquete.traccion_der, s1_val, s2_val, s3_val, s4_val, dt, contadorCola);
+
     // Log detallado de recepcion
     debugPrintf("[RF_RX #%lu] dt:%lu ms | Cola:%d | TracIzq:%d | TracDer:%d | S:[%d, %d, %d, %d] | ",
                 contadorPaquetesRx, dt, contadorCola, paquete.traccion_izq, paquete.traccion_der,
@@ -270,6 +277,7 @@ void loop() {
       contadorActivacionesFailsafe++;
       pararMotores();
       debugPrintf("[FAILSAFE ACTIVADO] Perdida de enlace RF (>%lu ms). MOTORES APAGADOS A 0.\n", TIMEOUT_MS);
+      debugPrintf("TLM:FAILSAFE,0,0,%d,%d,%d,%d,%lu,0\n", actualS1, actualS2, actualS3, actualS4, tiempoSinSenal);
     }
   }
 

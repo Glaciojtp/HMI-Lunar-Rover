@@ -203,7 +203,9 @@ void setup() {
     radioOnline = false;
   } else {
     radioOnline = true;
-    radio.setPALevel(RF24_PA_MAX);
+    radio.setPayloadSize(sizeof(PaqueteControl)); // 8 bytes exactos
+    radio.enableDynamicPayloads();                // Permitir tramas dinámicas
+    radio.setPALevel(RF24_PA_LOW);               // Nivel LOW para banco de pruebas (evita saturación LNA por cercanía)
     radio.setDataRate(RF24_250KBPS);
     radio.setChannel(108);
     radio.setAutoAck(true);
@@ -215,9 +217,10 @@ void setup() {
     Serial.print("   -> Chip conectado?: ");
     Serial.println(radio.isChipConnected() ? "SI (Comunicacion SPI OK)" : "NO (Posible falso contacto)");
     Serial.println("   -> Canal RF: 108 (2.508 GHz)");
-    Serial.println("   -> Data Rate: 250 KBPS (Max sensibilidad)");
-    Serial.println("   -> Potencia: RF24_PA_MAX");
+    Serial.println("   -> Data Rate: 250 KBPS");
+    Serial.println("   -> Potencia: RF24_PA_LOW (Protegido contra saturación de receptor)");
     Serial.println("   -> Auto-ACK: Habilitado (Retries: 5 delay / 15 intentos)");
+    Serial.println("   -> Dynamic Payloads: Habilitado");
     Serial.println("   -> Direccion Pipe TX: \"ROVER\"");
     Serial.printf("   -> Tamano de paquete: %d Bytes\n", sizeof(PaqueteControl));
   }
