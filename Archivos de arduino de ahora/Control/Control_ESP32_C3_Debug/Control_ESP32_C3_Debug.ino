@@ -10,6 +10,7 @@
  *    - SCK:  GPIO 6
  *    - MOSI: GPIO 3
  *    - MISO: GPIO 5
+ *    - LED:  GPIO 8 (LED azul integrado en la placa, activo en nivel BAJO)
  * =====================================================================================
  */
 
@@ -17,15 +18,25 @@
 #include <SPI.h>
 #include <RF24.h>
 #include <nRF24L01.h>
-#include <printf.h>
+#include <stdarg.h>
 
+// Definición de pines fijos
 #define PIN_CE   4
 #define PIN_CSN  7
+#define PIN_LED  8
 
 RF24 radio(PIN_CE, PIN_CSN);
 const byte DIRECCION_RF[6] = "ROVER";
 
-// Estructura estrictamente empaquetada (8 bytes)
+// Detección y compatibilidad con USB CDC Nativo y UART0
+#if !ARDUINO_USB_CDC_ON_BOOT && (defined(USBCON) || SOC_USB_SERIAL_JTAG_SUPPORTED)
+  #include <HWCDC.h>
+  #define TIENE_USBSERIAL 1
+#else
+  #define TIENE_USBSERIAL 0
+#endif
+
+// Estructura estrictamente empaquetada (8 bytes exactos)
 struct __attribute__((packed)) PaqueteControl {
   int16_t traccion_izq;  // -255 a 255 (Lado Izquierdo: M1, M2, M3)
   int16_t traccion_der;  // -255 a 255 (Lado Derecho:   M4, M5, M6)
@@ -42,12 +53,12 @@ unsigned long ultimoEnvioRF = 0;
 const unsigned long INTERVALO_RF_MS = 50; // 20 Hz
 unsigned long ultimoReporteStats = 0;
 const unsigned long INTERVALO_STATS_MS = 1000; // 1 Hz para resumen
+unsigned long ultimoParpadeoHeartbeat = 0;
 
 // Contadores y métricas de diagnóstico
 unsigned long contadorTotalEnvios = 0;
 unsigned long contadorEnviosExitosos = 0;
 unsigned long contadorEnviosFallidos = 0;
-unsigned long tiempoTotalTxMicros = 0;
 unsigned long ultimoTiempoTxMicros = 0;
 bool radioOnline = false;
 
@@ -55,15 +66,28 @@ bool radioOnline = false;
 char bufferSerial[128];
 byte indiceBuffer = 0;
 
+// Función de log universal que escribe simultáneamente a Serial y a USBSerial (si existe)
+void logMsg(const char *format, ...) {
+  char buf[256];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(buf, sizeof(buf), format, args);
+  va_end(args);
+
+  Serial.print(buf);
+#if TIENE_USBSERIAL
+  USBSerial.print(buf);
+#endif
+}
+
 void volcarPaqueteHex(const PaqueteControl &p) {
   const uint8_t* bytes = (const uint8_t*)&p;
-  Serial.print("HEX:[ ");
+  logMsg("HEX:[ ");
   for (size_t i = 0; i < sizeof(PaqueteControl); i++) {
-    if (bytes[i] < 0x10) Serial.print("0");
-    Serial.print(bytes[i], HEX);
-    Serial.print(" ");
+    if (bytes[i] < 0x10) logMsg("0");
+    logMsg("%X ", bytes[i]);
   }
-  Serial.print("]");
+  logMsg("]");
 }
 
 void procesarComando(char* cmdStr) {
@@ -71,11 +95,14 @@ void procesarComando(char* cmdStr) {
   trama.trim();
   if (trama.length() == 0) return;
 
-  Serial.print("[SERIAL_RX] (");
-  Serial.print(trama.length());
-  Serial.print(" B): \"");
-  Serial.print(trama);
-  Serial.println("\"");
+  // Comando de Diagnóstico PING / STATUS desde HMI o monitor
+  if (trama.equalsIgnoreCase("PING") || trama.equalsIgnoreCase("STATUS") || trama.equalsIgnoreCase("TEST")) {
+    logMsg("PONG:ESP32_C3_SUPERMINI_OK | Radio:%s | Canal:108 | PktsTx:%lu | Exitos:%lu | Uptime:%lu s\n",
+           radioOnline ? "ONLINE" : "ERROR", contadorTotalEnvios, contadorEnviosExitosos, millis() / 1000);
+    return;
+  }
+
+  logMsg("[SERIAL_RX] (%d B): \"%s\"\n", trama.length(), trama.c_str());
 
   // Comando de Parada de Emergencia
   if (trama.equalsIgnoreCase("STOP") || trama.equalsIgnoreCase("PARAR") || trama.equals(" ")) {
@@ -85,22 +112,23 @@ void procesarComando(char* cmdStr) {
     datosControl.angulo_s2 = 90;
     datosControl.angulo_s3 = 90;
     datosControl.angulo_s4 = 90;
-    Serial.println("[PARSE_OK] STOP GENERAL -> Motores=0, Servos=90° (Centrados)");
-    Serial.println("STATUS:STOP");
+    logMsg("[PARSE_OK] STOP GENERAL -> Motores=0, Servos=90° (Centrados)\n");
+    logMsg("STATUS:STOP\n");
     return;
   }
 
-  // Parseo de trama CSV extendida: "CMD,PotIzq,PotDer,S1,S2,S3,S4"
+  // Contar comas para admitir formato completo de 4 servos (6 comas) o formato base (2 comas)
   int partes[7];
   int contadorComas = 0;
 
-  for (int i = 0; i < trama.length() && contadorComas < 6; i++) {
+  for (int i = 0; i < (int)trama.length() && contadorComas < 6; i++) {
     if (trama.charAt(i) == ',') {
       partes[contadorComas++] = i;
     }
   }
 
   if (contadorComas >= 6) {
+    // Formato extendido: "CMD,PotIzq,PotDer,S1,S2,S3,S4"
     String cmd = trama.substring(0, partes[0]);
     cmd.toUpperCase();
 
@@ -136,76 +164,114 @@ void procesarComando(char* cmdStr) {
       datosControl.traccion_der = 0;
     }
 
-    Serial.print("[PARSE_OK] CMD: ");
-    Serial.print(cmd);
-    Serial.print(" | PWM_Izq: ");
-    Serial.print(datosControl.traccion_izq);
-    Serial.print(" | PWM_Der: ");
-    Serial.print(datosControl.traccion_der);
-    Serial.print(" | S1:");
-    Serial.print(datosControl.angulo_s1);
-    Serial.print("° S2:");
-    Serial.print(datosControl.angulo_s2);
-    Serial.print("° S3:");
-    Serial.print(datosControl.angulo_s3);
-    Serial.print("° S4:");
-    Serial.print(datosControl.angulo_s4);
-    Serial.print("° | ");
+    logMsg("[PARSE_OK] CMD:%s | TracIzq:%d | TracDer:%d | S:[%d,%d,%d,%d] | ",
+           cmd.c_str(), datosControl.traccion_izq, datosControl.traccion_der,
+           datosControl.angulo_s1, datosControl.angulo_s2, datosControl.angulo_s3, datosControl.angulo_s4);
     volcarPaqueteHex(datosControl);
-    Serial.println();
+    logMsg("\nSTATUS:OK_4SERVO\n");
 
-    Serial.println("STATUS:OK_4SERVO");
+  } else if (contadorComas >= 2) {
+    // Formato base: "CMD,PotIzq,PotDer"
+    String cmd = trama.substring(0, partes[0]);
+    cmd.toUpperCase();
+    int potIzq = trama.substring(partes[0] + 1, partes[1]).toInt();
+    int potDer = trama.substring(partes[1] + 1).toInt();
+
+    if (cmd == "W") {
+      datosControl.traccion_izq = potIzq; datosControl.traccion_der = potDer;
+      datosControl.angulo_s1 = 90; datosControl.angulo_s2 = 90;
+      datosControl.angulo_s3 = 90; datosControl.angulo_s4 = 90;
+    } else if (cmd == "S") {
+      datosControl.traccion_izq = -potIzq; datosControl.traccion_der = -potDer;
+      datosControl.angulo_s1 = 90; datosControl.angulo_s2 = 90;
+      datosControl.angulo_s3 = 90; datosControl.angulo_s4 = 90;
+    } else if (cmd == "A") {
+      datosControl.traccion_izq = potIzq; datosControl.traccion_der = potDer;
+      datosControl.angulo_s1 = 120; datosControl.angulo_s2 = 120;
+      datosControl.angulo_s3 = 60;  datosControl.angulo_s4 = 60;
+    } else if (cmd == "D") {
+      datosControl.traccion_izq = potIzq; datosControl.traccion_der = potDer;
+      datosControl.angulo_s1 = 60;  datosControl.angulo_s2 = 60;
+      datosControl.angulo_s3 = 120; datosControl.angulo_s4 = 120;
+    } else {
+      datosControl.traccion_izq = 0; datosControl.traccion_der = 0;
+    }
+
+    logMsg("[PARSE_OK_BASE] CMD:%s | TracIzq:%d | TracDer:%d | ",
+           cmd.c_str(), datosControl.traccion_izq, datosControl.traccion_der);
+    volcarPaqueteHex(datosControl);
+    logMsg("\nSTATUS:OK_BASE\n");
   } else {
-    Serial.print("[PARSE_WARN] Trama con formato invalido (se esperaban 6 comas): \"");
-    Serial.print(trama);
-    Serial.println("\"");
+    logMsg("[PARSE_WARN] Trama con formato desconocido: \"%s\"\n", trama.c_str());
+  }
+}
+
+void procesarCharEntrante(char c) {
+  if (c == '\n' || c == '\r') {
+    if (indiceBuffer > 0) {
+      bufferSerial[indiceBuffer] = '\0';
+      procesarComando(bufferSerial);
+      indiceBuffer = 0;
+    }
+  } else {
+    if (indiceBuffer < sizeof(bufferSerial) - 1) {
+      bufferSerial[indiceBuffer++] = c;
+    }
   }
 }
 
 void leerSerialNoBloqueante() {
   while (Serial.available() > 0) {
-    char c = Serial.read();
-    if (c == '\n' || c == '\r') {
-      if (indiceBuffer > 0) {
-        bufferSerial[indiceBuffer] = '\0';
-        procesarComando(bufferSerial);
-        indiceBuffer = 0;
-      }
-    } else {
-      if (indiceBuffer < sizeof(bufferSerial) - 1) {
-        bufferSerial[indiceBuffer++] = c;
-      }
-    }
+    procesarCharEntrante(Serial.read());
   }
+#if TIENE_USBSERIAL
+  while (USBSerial.available() > 0) {
+    procesarCharEntrante(USBSerial.read());
+  }
+#endif
 }
 
 void setup() {
-  setCpuFrequencyMhz(80);
+  // Configuración de pin LED integrado (GPIO 8)
+  pinMode(PIN_LED, OUTPUT);
+  digitalWrite(PIN_LED, LOW); // Enciende LED durante arranque (activo en LOW)
+
+  // Inicializar puertos Seriales (Hardware y USB CDC)
   Serial.begin(115200);
-  delay(1000);
+#if TIENE_USBSERIAL
+  USBSerial.begin(115200);
+#endif
 
-  Serial.println();
-  Serial.println("===============================================================");
-  Serial.println("🛰️ TRANSMISOR ESP32-C3 SUPERMINI — DEBUG & TELEMETRIA ACTIVA");
-  Serial.println("===============================================================");
-  Serial.printf("ESP32 Chip Model: %s | Rev: %d | Cores: %d\n", ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores());
-  Serial.printf("CPU Freq: %d MHz | Free Heap: %d Bytes\n", getCpuFrequencyMhz(), ESP.getFreeHeap());
-  Serial.println("Configurando SPI: SCK=GPIO 6, MISO=GPIO 5, MOSI=GPIO 3, CSN=GPIO 7...");
+  delay(500);
 
-  SPI.begin(6, 5, 3, 7);
+  logMsg("\n===============================================================\n");
+  logMsg("🛰️ TRANSMISOR ESP32-C3 SUPERMINI — DEBUG & TELEMETRIA ACTIVA\n");
+  logMsg("===============================================================\n");
+  logMsg("ESP32 Chip Model: %s | Rev: %d | Cores: %d\n", ESP.getChipModel(), ESP.getChipRevision(), ESP.getChipCores());
+  logMsg("CPU Freq: %d MHz | Free Heap: %d Bytes\n", getCpuFrequencyMhz(), ESP.getFreeHeap());
+  logMsg("Pines NRF24: CE=GPIO 4 | CSN=GPIO 7 | SCK=GPIO 6 | MOSI=GPIO 3 | MISO=GPIO 5\n");
 
-  Serial.println("Iniciando transceptor NRF24L01+...");
+  pinMode(PIN_CE, OUTPUT);
+  pinMode(PIN_CSN, OUTPUT);
+  digitalWrite(PIN_CSN, HIGH);
+  digitalWrite(PIN_CE, LOW);
+
+  // Iniciar bus SPI en pines especificados en AGENTS.md
+  SPI.begin(6, 5, 3, 7); // SCK=6, MISO=5, MOSI=3, CSN=7
+  delay(50);
+
+  logMsg("Iniciando transceptor NRF24L01+...\n");
   if (!radio.begin()) {
-    Serial.println("❌ ERROR FATAL: radio.begin() fallo. El modulo NRF24L01 no responde.");
-    Serial.println("   -> Verifique alimentacion 3.3V (NUNCA 5V)");
-    Serial.println("   -> Verifique capacitor de 10uF-100uF entre VCC y GND de la radio");
-    Serial.println("   -> Verifique conexion de pines CE(4), CSN(7), SCK(6), MOSI(3), MISO(5)");
+    logMsg("❌ ERROR FATAL: radio.begin() fallo. El modulo NRF24L01 no responde.\n");
+    logMsg("   -> Verifique alimentacion 3.3V (¡NUNCA 5V!)\n");
+    logMsg("   -> Verifique capacitor de 10uF-100uF entre VCC y GND de la radio\n");
+    logMsg("   -> Verifique conexion de pines CE(4), CSN(7), SCK(6), MOSI(3), MISO(5)\n");
     radioOnline = false;
   } else {
     radioOnline = true;
     radio.setPayloadSize(sizeof(PaqueteControl)); // 8 bytes exactos
-    radio.enableDynamicPayloads();                // Permitir tramas dinámicas
-    radio.setPALevel(RF24_PA_LOW);               // Nivel LOW para banco de pruebas (evita saturación LNA por cercanía)
+    radio.enableDynamicPayloads();                // Habilitar dynamic payloads
+    radio.setPALevel(RF24_PA_LOW);               // Nivel LOW para banco de pruebas (evita saturación LNA)
     radio.setDataRate(RF24_250KBPS);
     radio.setChannel(108);
     radio.setAutoAck(true);
@@ -213,21 +279,19 @@ void setup() {
     radio.openWritingPipe(DIRECCION_RF);
     radio.stopListening();
 
-    Serial.println("✅ NRF24L01 detectado e inicializado correctamente.");
-    Serial.print("   -> Chip conectado?: ");
-    Serial.println(radio.isChipConnected() ? "SI (Comunicacion SPI OK)" : "NO (Posible falso contacto)");
-    Serial.println("   -> Canal RF: 108 (2.508 GHz)");
-    Serial.println("   -> Data Rate: 250 KBPS");
-    Serial.println("   -> Potencia: RF24_PA_LOW (Protegido contra saturación de receptor)");
-    Serial.println("   -> Auto-ACK: Habilitado (Retries: 5 delay / 15 intentos)");
-    Serial.println("   -> Dynamic Payloads: Habilitado");
-    Serial.println("   -> Direccion Pipe TX: \"ROVER\"");
-    Serial.printf("   -> Tamano de paquete: %d Bytes\n", sizeof(PaqueteControl));
+    logMsg("✅ NRF24L01 detectado e inicializado correctamente.\n");
+    logMsg("   -> Chip conectado?: %s\n", radio.isChipConnected() ? "SI (SPI Hardware OK)" : "NO (Falso contacto)");
+    logMsg("   -> Canal RF: 108 (2.508 GHz) | Data Rate: 250 KBPS\n");
+    logMsg("   -> Potencia: RF24_PA_LOW (Banco de pruebas)\n");
+    logMsg("   -> Auto-ACK: Habilitado (Retries: 5 delay / 15 intentos)\n");
+    logMsg("   -> Direccion Pipe TX: \"ROVER\"\n");
+    logMsg("   -> Tamano de paquete: %d Bytes\n", sizeof(PaqueteControl));
   }
 
-  Serial.println("===============================================================");
-  Serial.println("Listo para recibir comandos por puerto Serial.");
-  Serial.println("===============================================================");
+  digitalWrite(PIN_LED, HIGH); // Apaga LED indicando arranque completado
+  logMsg("===============================================================\n");
+  logMsg("Listo para recibir comandos por puerto Serial USB.\n");
+  logMsg("===============================================================\n");
 }
 
 void loop() {
@@ -235,34 +299,44 @@ void loop() {
 
   unsigned long ahora = millis();
 
+  // Transmisión periódica a 20 Hz
   if (ahora - ultimoEnvioRF >= INTERVALO_RF_MS) {
     ultimoEnvioRF = ahora;
     contadorTotalEnvios++;
 
     if (radioOnline) {
+      digitalWrite(PIN_LED, LOW); // Breve destello LED en TX
       unsigned long tInicio = micros();
       bool exito = radio.write(&datosControl, sizeof(datosControl));
       unsigned long tFin = micros();
+      digitalWrite(PIN_LED, HIGH);
       ultimoTiempoTxMicros = tFin - tInicio;
 
       if (exito) {
         contadorEnviosExitosos++;
       } else {
         contadorEnviosFallidos++;
-        // Advertencia en consola de fallo de paquete
-        Serial.printf("[RF_WARN] Fallo transmision paquete #%lu (sin ACK receptor)\n", contadorTotalEnvios);
+        logMsg("[RF_WARN] Fallo transmision paquete #%lu (sin ACK del MKR)\n", contadorTotalEnvios);
       }
     }
   }
 
-  // Reporte periodico de estadisticas a 1 Hz
+  // Reporte periódico de estadísticas a 1 Hz
   if (ahora - ultimoReporteStats >= INTERVALO_STATS_MS) {
     ultimoReporteStats = ahora;
     float tasaExito = (contadorTotalEnvios > 0) ? ((float)contadorEnviosExitosos / contadorTotalEnvios * 100.0) : 0.0;
 
-    Serial.printf("[STATS_TX] Tot:%lu | OK:%lu | Fail:%lu | Tasa:%.1f%% | Ultimo_dt:%lu us | ",
-                  contadorTotalEnvios, contadorEnviosExitosos, contadorEnviosFallidos, tasaExito, ultimoTiempoTxMicros);
+    logMsg("[STATS_TX] Tot:%lu | OK:%lu | Fail:%lu | Tasa:%.1f%% | dt:%lu us | ",
+           contadorTotalEnvios, contadorEnviosExitosos, contadorEnviosFallidos, tasaExito, ultimoTiempoTxMicros);
     volcarPaqueteHex(datosControl);
-    Serial.println();
+    logMsg("\n");
+  }
+
+  // Si la radio falló al arrancar, parpadear LED en patrón de alerta continuo
+  if (!radioOnline) {
+    if (ahora - ultimoParpadeoHeartbeat >= 200) {
+      ultimoParpadeoHeartbeat = ahora;
+      digitalWrite(PIN_LED, !digitalRead(PIN_LED));
+    }
   }
 }

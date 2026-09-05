@@ -71,7 +71,7 @@ class HMIRoverDebug:
         self.tx_continuo = tk.BooleanVar(value=True)
 
         # Estado dinámico de control (TX)
-        self.comando_actual = " "
+        self.comando_actual = "STOP"
         self.modo_conduccion = tk.StringVar(value="ACKERMANN")
         self.teclas_presionadas = {'w': False, 'a': False, 's': False, 'd': False, 'q': False, 'e': False, 'space': False}
 
@@ -94,7 +94,7 @@ class HMIRoverDebug:
 
         # Estado Snapshot TX (último enviado)
         self.snapshot_tx = {
-            'cmd': ' ', 'izq': 0, 'der': 0,
+            'cmd': 'STOP', 'izq': 0, 'der': 0,
             's1': 90, 's2': 90, 's3': 90, 's4': 90,
             't': time.time()
         }
@@ -141,33 +141,45 @@ class HMIRoverDebug:
 
         # --- SECCION TX (ESP32-C3) ---
         frm_tx_conn = ttk.Frame(top_bar, style="Card.TFrame")
-        frm_tx_conn.pack(side="left", padx=(0, 15))
+        frm_tx_conn.pack(side="left", padx=(0, 10))
 
         tk.Label(frm_tx_conn, text="📡 TX (ESP32):", bg="#151824", fg="#00f5d4", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 4))
-        self.cb_puerto_tx = ttk.Combobox(frm_tx_conn, width=10, state="readonly")
+        self.cb_puerto_tx = ttk.Combobox(frm_tx_conn, width=9, state="readonly")
         self.cb_puerto_tx.pack(side="left", padx=2)
 
         self.btn_conectar_tx = tk.Button(frm_tx_conn, text="Conectar TX", bg="#00f5d4", fg="#0c0e17",
-                                         font=("Segoe UI", 8, "bold"), command=self.toggle_conexion_tx, relief="flat", padx=6)
-        self.btn_conectar_tx.pack(side="left", padx=4)
+                                         font=("Segoe UI", 8, "bold"), command=self.toggle_conexion_tx, relief="flat", padx=5)
+        self.btn_conectar_tx.pack(side="left", padx=2)
+
+        self.btn_ping_tx = tk.Button(frm_tx_conn, text="⚡ Ping", bg="#0f766e", fg="#ffffff",
+                                     font=("Segoe UI", 8, "bold"), command=self.ping_tx, relief="flat", padx=4)
+        self.btn_ping_tx.pack(side="left", padx=2)
+
+        self.btn_reset_tx = tk.Button(frm_tx_conn, text="🔄 Reset", bg="#334155", fg="#fca5a5",
+                                      font=("Segoe UI", 8, "bold"), command=self.reset_hw_tx, relief="flat", padx=4)
+        self.btn_reset_tx.pack(side="left", padx=2)
 
         self.badge_tx = tk.Label(frm_tx_conn, text="🔴 TX OFF", bg="#2a2e3f", fg="#f87171", font=("Segoe UI", 8, "bold"), padx=6)
         self.badge_tx.pack(side="left", padx=2)
 
         # Separador vertical
-        ttk.Separator(top_bar, orient="vertical").pack(side="left", fill="y", padx=8)
+        ttk.Separator(top_bar, orient="vertical").pack(side="left", fill="y", padx=6)
 
         # --- SECCION RX (Arduino MKR 1310) ---
         frm_rx_conn = ttk.Frame(top_bar, style="Card.TFrame")
-        frm_rx_conn.pack(side="left", padx=(0, 15))
+        frm_rx_conn.pack(side="left", padx=(0, 10))
 
-        tk.Label(frm_rx_conn, text="🤖 RX (MKR 1310):", bg="#151824", fg="#fbbf24", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 4))
-        self.cb_puerto_rx = ttk.Combobox(frm_rx_conn, width=10, state="readonly")
+        tk.Label(frm_rx_conn, text="🤖 RX (MKR):", bg="#151824", fg="#fbbf24", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 4))
+        self.cb_puerto_rx = ttk.Combobox(frm_rx_conn, width=9, state="readonly")
         self.cb_puerto_rx.pack(side="left", padx=2)
 
         self.btn_conectar_rx = tk.Button(frm_rx_conn, text="Conectar RX", bg="#fbbf24", fg="#0c0e17",
-                                         font=("Segoe UI", 8, "bold"), command=self.toggle_conexion_rx, relief="flat", padx=6)
-        self.btn_conectar_rx.pack(side="left", padx=4)
+                                         font=("Segoe UI", 8, "bold"), command=self.toggle_conexion_rx, relief="flat", padx=5)
+        self.btn_conectar_rx.pack(side="left", padx=2)
+
+        self.btn_ping_rx = tk.Button(frm_rx_conn, text="⚡ Ping", bg="#854d0e", fg="#ffffff",
+                                     font=("Segoe UI", 8, "bold"), command=self.ping_rx, relief="flat", padx=4)
+        self.btn_ping_rx.pack(side="left", padx=2)
 
         self.badge_rx = tk.Label(frm_rx_conn, text="🔴 RX OFF", bg="#2a2e3f", fg="#f87171", font=("Segoe UI", 8, "bold"), padx=6)
         self.badge_rx.pack(side="left", padx=2)
@@ -177,7 +189,7 @@ class HMIRoverDebug:
         btn_refrescar.pack(side="left", padx=4)
 
         # Modo de Conducción
-        tk.Label(top_bar, text="Modo:", bg="#151824", fg="#cbd5e1", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(10, 4))
+        tk.Label(top_bar, text="Modo:", bg="#151824", fg="#cbd5e1", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(8, 4))
         self.cb_modo = ttk.Combobox(top_bar, width=12, textvariable=self.modo_conduccion,
                                     values=["ACKERMANN", "POINT_TURN", "CRAB", "MANUAL"], state="readonly")
         self.cb_modo.pack(side="left", padx=2)
@@ -459,15 +471,54 @@ class HMIRoverDebug:
                 messagebox.showwarning("Atención", "Seleccione un puerto válido para TX.")
                 return
             try:
-                self.serial_tx = serial.Serial(p, 115200, timeout=0.1)
-                time.sleep(0.3)
+                self.serial_tx = serial.Serial()
+                self.serial_tx.port = p
+                self.serial_tx.baudrate = 115200
+                self.serial_tx.timeout = 0.05
+                self.serial_tx.write_timeout = 0.2
+                # RTS=False previene que el ESP32 entre en modo ROM Bootloader por GPIO9
+                self.serial_tx.rts = False
+                self.serial_tx.dtr = False
+                self.serial_tx.open()
+                time.sleep(0.15)
+                # DTR=True indica terminal lista al controlador USB CDC del ESP32-C3
+                self.serial_tx.dtr = True
                 self.conectado_tx = True
                 self.btn_conectar_tx.config(text="Desconectar TX", bg="#e63946", fg="#ffffff")
                 self.badge_tx.config(text=f"🟢 {p}", bg="#064e3b", fg="#34d399")
-                self.log_consola("SYS", f"Transmisor ESP32 conectado en {p} @ 115200 bps.")
+                self.log_consola("SYS", f"Transmisor ESP32 conectado en {p} @ 115200 bps (DTR=ON, RTS=OFF).")
+                # Auto-ping inmediato tras 300 ms
+                self.root.after(300, self.ping_tx)
             except Exception as e:
                 self.conectado_tx = False
                 messagebox.showerror("Error TX", f"No se pudo conectar a {p}:\n{e}")
+
+    def ping_tx(self):
+        if self.conectado_tx and self.serial_tx and self.serial_tx.is_open:
+            try:
+                self.serial_tx.write(b"PING\n")
+                self.log_consola("TX", "[DIAGNOSTICO] Enviado comando 'PING' a ESP32...")
+            except Exception as e:
+                self.log_consola("WARN", f"Error enviando PING a ESP32: {e}")
+        else:
+            messagebox.showinfo("Ping TX", "Conecte primero el puerto TX (ESP32).")
+
+    def reset_hw_tx(self):
+        if self.conectado_tx and self.serial_tx and self.serial_tx.is_open:
+            try:
+                self.log_consola("SYS", "[RESET] Enviando pulso de reinicio por hardware a ESP32...")
+                self.serial_tx.dtr = False
+                self.serial_tx.rts = True
+                time.sleep(0.1)
+                self.serial_tx.rts = False
+                time.sleep(0.15)
+                self.serial_tx.dtr = True
+                self.log_consola("SYS", "[RESET] ESP32 liberado. Esperando arranque...")
+                self.root.after(1000, self.ping_tx)
+            except Exception as e:
+                self.log_consola("WARN", f"Error reiniciando ESP32: {e}")
+        else:
+            messagebox.showinfo("Reset TX", "Conecte primero el puerto TX (ESP32).")
 
     def toggle_conexion_rx(self):
         if not SERIAL_DISPONIBLE:
@@ -490,15 +541,33 @@ class HMIRoverDebug:
                 messagebox.showwarning("Atención", "Seleccione un puerto válido para RX.")
                 return
             try:
-                self.serial_rx = serial.Serial(p, 115200, timeout=0.1)
-                time.sleep(0.3)
+                self.serial_rx = serial.Serial()
+                self.serial_rx.port = p
+                self.serial_rx.baudrate = 115200
+                self.serial_rx.timeout = 0.05
+                self.serial_rx.write_timeout = 0.2
+                self.serial_rx.rts = False
+                self.serial_rx.dtr = True
+                self.serial_rx.open()
+                time.sleep(0.15)
                 self.conectado_rx = True
                 self.btn_conectar_rx.config(text="Desconectar RX", bg="#e63946", fg="#ffffff")
                 self.badge_rx.config(text=f"🟢 {p}", bg="#451a03", fg="#fbbf24")
                 self.log_consola("SYS", f"Receptor MKR 1310 conectado en {p} @ 115200 bps.")
+                self.root.after(300, self.ping_rx)
             except Exception as e:
                 self.conectado_rx = False
                 messagebox.showerror("Error RX", f"No se pudo conectar a {p}:\n{e}")
+
+    def ping_rx(self):
+        if self.conectado_rx and self.serial_rx and self.serial_rx.is_open:
+            try:
+                self.serial_rx.write(b"PING\n")
+                self.log_consola("MKR", "[DIAGNOSTICO] Enviado comando 'PING' a MKR 1310...")
+            except Exception as e:
+                self.log_consola("WARN", f"Error enviando PING a MKR: {e}")
+        else:
+            messagebox.showinfo("Ping RX", "Conecte primero el puerto RX (MKR 1310).")
 
     def iniciar_hilos(self):
         self.hilo_tx = threading.Thread(target=self.bucle_lectura_tx, daemon=True)
@@ -513,7 +582,10 @@ class HMIRoverDebug:
                 try:
                     linea = self.serial_tx.readline().decode('utf-8', errors='ignore').strip()
                     if linea:
-                        if self.mostrar_raw_esp.get():
+                        if linea.startswith("PONG:"):
+                            self.root.after(0, self.log_consola, "SYS", f"✅ {linea}")
+                            self.root.after(0, lambda: self.badge_tx.config(text=f"🟢 ESP32 OK", bg="#064e3b", fg="#34d399"))
+                        elif self.mostrar_raw_esp.get():
                             self.root.after(0, self.log_consola, "ESP", f"[ESP32 TX]: {linea}")
                 except:
                     pass
@@ -532,6 +604,11 @@ class HMIRoverDebug:
             time.sleep(0.01)
 
     def procesar_linea_mkr(self, linea):
+        if linea.startswith("PONG:"):
+            self.root.after(0, self.log_consola, "SYS", f"✅ {linea}")
+            self.root.after(0, lambda: self.badge_rx.config(text=f"🟢 MKR OK", bg="#451a03", fg="#fbbf24"))
+            return
+
         # Si es la trama de telemetría estructurada TLM:izq,der,s1,s2,s3,s4,dt,cola
         if linea.startswith("TLM:"):
             datos = linea[4:].split(',')
@@ -606,6 +683,7 @@ class HMIRoverDebug:
         cmd = self.comando_actual.upper()
 
         if cmd == " " or cmd == "STOP":
+            cmd = "STOP"
             pot_izq_efectivo = 0
             pot_der_efectivo = 0
             s1 = 90; s2 = 90; s3 = 90; s4 = 90

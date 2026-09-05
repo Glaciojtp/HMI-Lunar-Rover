@@ -30,7 +30,7 @@
 RF24 radio(PIN_CE, PIN_CSN);
 const byte DIRECCION_RF[6] = "ROVER";
 
-// Estructura estrictamente empaquetada (8 bytes)
+// Estructura estrictamente empaquetada (8 bytes: 4 servos)
 struct __attribute__((packed)) PaqueteControl {
   int16_t traccion_izq;  // -255 a 255 (Lado Izquierdo)
   int16_t traccion_der;  // -255 a 255 (Lado Derecho)
@@ -38,6 +38,14 @@ struct __attribute__((packed)) PaqueteControl {
   uint8_t angulo_s2;     // S2: Delantero Der
   uint8_t angulo_s3;     // S3: Trasero Izq
   uint8_t angulo_s4;     // S4: Trasero Der
+};
+
+// Estructura base de 6 bytes (2 servos, segun AGENTS.md)
+struct __attribute__((packed)) PaqueteControl6 {
+  int16_t traccion_izq;  // -255 a 255
+  int16_t traccion_der;  // -255 a 255
+  uint8_t angulo_s1;     // S1: Delantero Izq
+  uint8_t angulo_s2;     // S2: Delantero Der
 };
 
 // Prototipos explícitos para el preprocesador de Arduino
@@ -212,53 +220,87 @@ void setup() {
 void loop() {
   unsigned long ahora = millis();
 
+  // Escucha de comandos de diagnostico por puerto USB Serial (ej: "PING", "STATUS")
+  if (Serial.available() > 0) {
+    String cmdUsb = Serial.readStringUntil('\n');
+    cmdUsb.trim();
+    if (cmdUsb.equalsIgnoreCase("PING") || cmdUsb.equalsIgnoreCase("STATUS") || cmdUsb.equalsIgnoreCase("TEST")) {
+      debugPrintf("PONG:MKR1310_ONLINE | Radio:%s | TotalRx:%lu | Failsafes:%lu | SinSenal:%lu ms | Estado:%s\n",
+                  radioOnline ? "ONLINE" : "ERROR",
+                  contadorPaquetesRx, contadorActivacionesFailsafe,
+                  ahora - ultimaRecepcion, enFailsafe ? "FAILSAFE" : "OPERATIVO");
+    }
+  }
+
   if (radioOnline && radio.available()) {
-    PaqueteControl paquete;
+    PaqueteControl paqueteFinal = {0, 0, 90, 90, 90, 90};
     int contadorCola = 0;
+    uint8_t tamanoRecibido = 0;
 
-    // Drenaje rapido de la cola FIFO para quedarse siempre con el paquete mas fresco
+    // Drenaje rapido de la cola FIFO procesando siempre el paquete mas fresco
     while (radio.available()) {
-      radio.read(&paquete, sizeof(paquete));
-      contadorCola++;
+      uint8_t len = radio.getDynamicPayloadSize();
+      if (len == sizeof(PaqueteControl)) { // 8 bytes (4 servos)
+        radio.read(&paqueteFinal, sizeof(PaqueteControl));
+        tamanoRecibido = 8;
+        contadorCola++;
+      } else if (len == sizeof(PaqueteControl6)) { // 6 bytes (2 servos)
+        PaqueteControl6 p6;
+        radio.read(&p6, sizeof(PaqueteControl6));
+        paqueteFinal.traccion_izq = p6.traccion_izq;
+        paqueteFinal.traccion_der = p6.traccion_der;
+        paqueteFinal.angulo_s1 = p6.angulo_s1;
+        paqueteFinal.angulo_s2 = p6.angulo_s2;
+        paqueteFinal.angulo_s3 = 180 - p6.angulo_s1;
+        paqueteFinal.angulo_s4 = 180 - p6.angulo_s2;
+        tamanoRecibido = 6;
+        contadorCola++;
+      } else {
+        // Longitud inesperada o paquete corrupto: vaciar búfer
+        radio.flush_rx();
+        break;
+      }
     }
 
-    if (contadorCola > 1) {
-      contadorPaquetesDescartados += (contadorCola - 1);
+    if (contadorCola > 0) {
+      if (contadorCola > 1) {
+        contadorPaquetesDescartados += (contadorCola - 1);
+      }
+
+      unsigned long dt = ahora - ultimaRecepcion;
+      ultimaRecepcion = ahora;
+      contadorPaquetesRx++;
+
+      if (enFailsafe) {
+        enFailsafe = false;
+        debugPrintf("[RESTAURADO] Enlace RF recuperado despues de %lu ms.\n", dt);
+      }
+
+      // Aplicar traccion y direccion
+      aplicarControlMotores(paqueteFinal.traccion_izq, paqueteFinal.traccion_der);
+
+      uint8_t s1_val = constrain(paqueteFinal.angulo_s1, 10, 170);
+      uint8_t s2_val = constrain(paqueteFinal.angulo_s2, 10, 170);
+      uint8_t s3_val = constrain(paqueteFinal.angulo_s3, 10, 170);
+      uint8_t s4_val = constrain(paqueteFinal.angulo_s4, 10, 170);
+
+      servo1.write(s1_val);
+      servo2.write(s2_val);
+      servo3.write(s3_val);
+      servo4.write(s4_val);
+
+      actualS1 = s1_val; actualS2 = s2_val; actualS3 = s3_val; actualS4 = s4_val;
+
+      // Telemetria estructurada para la interfaz HMI: TLM:izq,der,s1,s2,s3,s4,dt,cola
+      debugPrintf("TLM:%d,%d,%d,%d,%d,%d,%lu,%d\n", paqueteFinal.traccion_izq, paqueteFinal.traccion_der, s1_val, s2_val, s3_val, s4_val, dt, contadorCola);
+
+      // Log detallado de recepcion
+      debugPrintf("[RF_RX #%lu] (%d B) dt:%lu ms | Cola:%d | TracIzq:%d | TracDer:%d | S:[%d, %d, %d, %d] | ",
+                  contadorPaquetesRx, tamanoRecibido, dt, contadorCola, paqueteFinal.traccion_izq, paqueteFinal.traccion_der,
+                  s1_val, s2_val, s3_val, s4_val);
+      volcarPaqueteHex(paqueteFinal);
+      Serial.println();
     }
-
-    unsigned long dt = ahora - ultimaRecepcion;
-    ultimaRecepcion = ahora;
-    contadorPaquetesRx++;
-
-    if (enFailsafe) {
-      enFailsafe = false;
-      debugPrintf("[RESTAURADO] Enlace RF recuperado despues de %lu ms.\n", dt);
-    }
-
-    // Aplicar traccion y direccion
-    aplicarControlMotores(paquete.traccion_izq, paquete.traccion_der);
-
-    uint8_t s1_val = constrain(paquete.angulo_s1, 10, 170);
-    uint8_t s2_val = constrain(paquete.angulo_s2, 10, 170);
-    uint8_t s3_val = constrain(paquete.angulo_s3, 10, 170);
-    uint8_t s4_val = constrain(paquete.angulo_s4, 10, 170);
-
-    servo1.write(s1_val);
-    servo2.write(s2_val);
-    servo3.write(s3_val);
-    servo4.write(s4_val);
-
-    actualS1 = s1_val; actualS2 = s2_val; actualS3 = s3_val; actualS4 = s4_val;
-
-    // Telemetria estructurada para la interfaz HMI: TLM:izq,der,s1,s2,s3,s4,dt,cola
-    debugPrintf("TLM:%d,%d,%d,%d,%d,%d,%lu,%d\n", paquete.traccion_izq, paquete.traccion_der, s1_val, s2_val, s3_val, s4_val, dt, contadorCola);
-
-    // Log detallado de recepcion
-    debugPrintf("[RF_RX #%lu] dt:%lu ms | Cola:%d | TracIzq:%d | TracDer:%d | S:[%d, %d, %d, %d] | ",
-                contadorPaquetesRx, dt, contadorCola, paquete.traccion_izq, paquete.traccion_der,
-                s1_val, s2_val, s3_val, s4_val);
-    volcarPaqueteHex(paquete);
-    Serial.println();
   }
 
   // Failsafe Watchdog: advertencia a los 500 ms y corte de seguridad a los 1000 ms
