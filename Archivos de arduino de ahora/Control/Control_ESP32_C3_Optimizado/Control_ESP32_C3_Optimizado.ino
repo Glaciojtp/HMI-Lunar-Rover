@@ -145,11 +145,11 @@ void setup() {
   if (!radio.begin()) {
     Serial.println("ERROR: NRF24L01 no detectado en ESP32.");
   } else {
+    radio.setPayloadSize(sizeof(PaqueteControl)); // 8 bytes exactos
     radio.setPALevel(RF24_PA_MAX);
     radio.setDataRate(RF24_250KBPS);
     radio.setChannel(108);
-    radio.setAutoAck(true);
-    radio.setRetries(5, 15);
+    radio.setAutoAck(false); // Modo streaming continuo (sin ACK)
     radio.openWritingPipe(DIRECCION_RF);
     radio.stopListening();
     Serial.println("SYS:ESP32_TX_4SERVO_READY");

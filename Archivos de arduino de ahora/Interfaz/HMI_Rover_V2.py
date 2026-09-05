@@ -514,12 +514,19 @@ class HMIRoverRockerBogie:
 
             baud = int(self.cb_baud.get())
             try:
-                self.serial_conn = serial.Serial(puerto, baud, timeout=0.1)
-                time.sleep(0.5)
+                self.serial_conn = serial.Serial()
+                self.serial_conn.port = puerto
+                self.serial_conn.baudrate = baud
+                self.serial_conn.timeout = 0.1
+                self.serial_conn.rts = False
+                self.serial_conn.dtr = False
+                self.serial_conn.open()
+                time.sleep(0.15)
+                self.serial_conn.dtr = True
                 self.conectado = True
                 self.btn_conectar.config(text="❌ DESCONECTAR", bg="#e63946", fg="#ffffff")
                 self.lbl_estado_badge.config(text=f"🟢 CONECTADO ({puerto})", bg="#064e3b", fg="#34d399")
-                self.log_consola(f"Conexión exitosa en {puerto} a {baud} baudios.")
+                self.log_consola(f"Conexión exitosa en {puerto} a {baud} baudios (DTR=ON, RTS=OFF).")
             except Exception as e:
                 self.conectado = False
                 messagebox.showerror("Error de Conexión", f"No se pudo abrir {puerto}:\n{e}")
@@ -538,10 +545,15 @@ class HMIRoverRockerBogie:
         s3 = self.ang_s3.get()
         s4 = self.ang_s4.get()
 
-        cmd = self.comando_actual.upper()
+        cmd = self.comando_actual.strip().upper()
+        if not cmd:
+            cmd = "STOP"
 
-        # Trama extendida para 4 servos: "M,PotIzq,PotDer,S1,S2,S3,S4\n" o "CMD,PotIzq,PotDer,S1,S2,S3,S4\n"
-        trama = f"{cmd},{pot_izq},{pot_der},{s1},{s2},{s3},{s4}\n"
+        # Trama extendida para 4 servos: "CMD,PotIzq,PotDer,S1,S2,S3,S4\n"
+        if cmd == "STOP":
+            trama = f"STOP,0,0,{s1},{s2},{s3},{s4}\n"
+        else:
+            trama = f"{cmd},{pot_izq},{pot_der},{s1},{s2},{s3},{s4}\n"
 
         try:
             self.serial_conn.write(trama.encode('ascii'))

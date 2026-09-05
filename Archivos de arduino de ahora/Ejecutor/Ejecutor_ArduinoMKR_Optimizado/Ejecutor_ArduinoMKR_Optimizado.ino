@@ -120,10 +120,11 @@ void setup() {
     while (true) { delay(500); }
   }
 
+  radio.setPayloadSize(sizeof(PaqueteControl)); // 8 bytes exactos
   radio.setPALevel(RF24_PA_MAX);
   radio.setDataRate(RF24_250KBPS);
   radio.setChannel(108);
-  radio.setAutoAck(true);
+  radio.setAutoAck(false); // Modo streaming continuo (sin ACK)
   radio.openReadingPipe(1, DIRECCION_RF);
   radio.startListening();
 
