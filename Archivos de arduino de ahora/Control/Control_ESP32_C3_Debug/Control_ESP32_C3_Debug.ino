@@ -270,12 +270,11 @@ void setup() {
   } else {
     radioOnline = true;
     radio.setPayloadSize(sizeof(PaqueteControl)); // 8 bytes exactos
-    radio.enableDynamicPayloads();                // Habilitar dynamic payloads
+    // Dynamic payloads DESHABILITADO para compatibilidad 100%
     radio.setPALevel(RF24_PA_LOW);               // Nivel LOW para banco de pruebas (evita saturación LNA)
     radio.setDataRate(RF24_250KBPS);
     radio.setChannel(108);
-    radio.setAutoAck(true);
-    radio.setRetries(5, 15);
+    radio.setAutoAck(false);                     // Modo streaming unidireccional continuo (sin ACK)
     radio.openWritingPipe(DIRECCION_RF);
     radio.stopListening();
 
@@ -283,9 +282,9 @@ void setup() {
     logMsg("   -> Chip conectado?: %s\n", radio.isChipConnected() ? "SI (SPI Hardware OK)" : "NO (Falso contacto)");
     logMsg("   -> Canal RF: 108 (2.508 GHz) | Data Rate: 250 KBPS\n");
     logMsg("   -> Potencia: RF24_PA_LOW (Banco de pruebas)\n");
-    logMsg("   -> Auto-ACK: Habilitado (Retries: 5 delay / 15 intentos)\n");
+    logMsg("   -> Modo de transmision: STREAMING CONTINUO (Sin ACK, maxima fluidez)\n");
     logMsg("   -> Direccion Pipe TX: \"ROVER\"\n");
-    logMsg("   -> Tamano de paquete: %d Bytes\n", sizeof(PaqueteControl));
+    logMsg("   -> Tamano de paquete: %d Bytes FIJOS\n", sizeof(PaqueteControl));
   }
 
   digitalWrite(PIN_LED, HIGH); // Apaga LED indicando arranque completado
@@ -316,7 +315,6 @@ void loop() {
         contadorEnviosExitosos++;
       } else {
         contadorEnviosFallidos++;
-        logMsg("[RF_WARN] Fallo transmision paquete #%lu (sin ACK del MKR)\n", contadorTotalEnvios);
       }
     }
   }
@@ -324,10 +322,11 @@ void loop() {
   // Reporte periódico de estadísticas a 1 Hz
   if (ahora - ultimoReporteStats >= INTERVALO_STATS_MS) {
     ultimoReporteStats = ahora;
-    float tasaExito = (contadorTotalEnvios > 0) ? ((float)contadorEnviosExitosos / contadorTotalEnvios * 100.0) : 0.0;
 
-    logMsg("[STATS_TX] Tot:%lu | OK:%lu | Fail:%lu | Tasa:%.1f%% | dt:%lu us | ",
-           contadorTotalEnvios, contadorEnviosExitosos, contadorEnviosFallidos, tasaExito, ultimoTiempoTxMicros);
+    logMsg("[STATS_TX] Tot:%lu | Modo:STREAM_NO_ACK | dt:%lu us | Trac:[%d, %d] | S:[%d, %d, %d, %d] | ",
+           contadorTotalEnvios, ultimoTiempoTxMicros,
+           datosControl.traccion_izq, datosControl.traccion_der,
+           datosControl.angulo_s1, datosControl.angulo_s2, datosControl.angulo_s3, datosControl.angulo_s4);
     volcarPaqueteHex(datosControl);
     logMsg("\n");
   }

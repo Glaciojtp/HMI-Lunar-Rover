@@ -194,20 +194,20 @@ void setup() {
   } else {
     radioOnline = true;
     radio.setPayloadSize(sizeof(PaqueteControl)); // 8 bytes exactos
-    radio.enableDynamicPayloads();                // Permitir tramas dinámicas
+    // Dynamic payloads DESHABILITADO para compatibilidad 100%
     radio.setPALevel(RF24_PA_LOW);               // Nivel LOW para banco de pruebas (evita saturación LNA)
     radio.setDataRate(RF24_250KBPS);
     radio.setChannel(108);
-    radio.setAutoAck(true);
+    radio.setAutoAck(false);                     // Modo streaming continuo (sin ACK)
     radio.openReadingPipe(1, DIRECCION_RF);
     radio.startListening();
 
     Serial.println("✅ NRF24L01 receptor configurado y escuchando.");
     Serial.print("   -> Chip conectado?: ");
     Serial.println(radio.isChipConnected() ? "SI (SPI Hardware OK)" : "NO (Falso contacto)");
-    Serial.println("   -> Canal RF: 108 | Velocidad: 250 KBPS | AutoAck: SI");
+    Serial.println("   -> Canal RF: 108 | Velocidad: 250 KBPS | Modo: STREAMING (Sin ACK)");
     Serial.println("   -> Potencia: RF24_PA_LOW (Banco de pruebas)");
-    debugPrintf("   -> Tamano de paquete: %d Bytes\n", sizeof(PaqueteControl));
+    debugPrintf("   -> Tamano de paquete: %d Bytes FIJOS\n", sizeof(PaqueteControl));
     Serial.println("   -> Escuchando en Pipe 1 con direccion: \"ROVER\"");
   }
 
@@ -235,31 +235,11 @@ void loop() {
   if (radioOnline && radio.available()) {
     PaqueteControl paqueteFinal = {0, 0, 90, 90, 90, 90};
     int contadorCola = 0;
-    uint8_t tamanoRecibido = 0;
 
-    // Drenaje rapido de la cola FIFO procesando siempre el paquete mas fresco
+    // Drenaje rapido de la cola FIFO procesando siempre el paquete mas fresco (regla AGENTS.md 5.3.2)
     while (radio.available()) {
-      uint8_t len = radio.getDynamicPayloadSize();
-      if (len == sizeof(PaqueteControl)) { // 8 bytes (4 servos)
-        radio.read(&paqueteFinal, sizeof(PaqueteControl));
-        tamanoRecibido = 8;
-        contadorCola++;
-      } else if (len == sizeof(PaqueteControl6)) { // 6 bytes (2 servos)
-        PaqueteControl6 p6;
-        radio.read(&p6, sizeof(PaqueteControl6));
-        paqueteFinal.traccion_izq = p6.traccion_izq;
-        paqueteFinal.traccion_der = p6.traccion_der;
-        paqueteFinal.angulo_s1 = p6.angulo_s1;
-        paqueteFinal.angulo_s2 = p6.angulo_s2;
-        paqueteFinal.angulo_s3 = 180 - p6.angulo_s1;
-        paqueteFinal.angulo_s4 = 180 - p6.angulo_s2;
-        tamanoRecibido = 6;
-        contadorCola++;
-      } else {
-        // Longitud inesperada o paquete corrupto: vaciar búfer
-        radio.flush_rx();
-        break;
-      }
+      radio.read(&paqueteFinal, sizeof(PaqueteControl));
+      contadorCola++;
     }
 
     if (contadorCola > 0) {
@@ -296,7 +276,7 @@ void loop() {
 
       // Log detallado de recepcion
       debugPrintf("[RF_RX #%lu] (%d B) dt:%lu ms | Cola:%d | TracIzq:%d | TracDer:%d | S:[%d, %d, %d, %d] | ",
-                  contadorPaquetesRx, tamanoRecibido, dt, contadorCola, paqueteFinal.traccion_izq, paqueteFinal.traccion_der,
+                  contadorPaquetesRx, sizeof(PaqueteControl), dt, contadorCola, paqueteFinal.traccion_izq, paqueteFinal.traccion_der,
                   s1_val, s2_val, s3_val, s4_val);
       volcarPaqueteHex(paqueteFinal);
       Serial.println();
