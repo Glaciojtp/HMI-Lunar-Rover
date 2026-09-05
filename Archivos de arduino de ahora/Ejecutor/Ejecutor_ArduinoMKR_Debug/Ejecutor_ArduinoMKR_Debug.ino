@@ -22,12 +22,23 @@
 #include <SPI.h>
 #include <RF24.h>
 #include <Servo.h>
+#include <stdarg.h>
 
 #define PIN_CE  0
 #define PIN_CSN 1
 
 RF24 radio(PIN_CE, PIN_CSN);
 const byte DIRECCION_RF[6] = "ROVER";
+
+// Helper printf para Arduino SAMD21 (el core SAMD no implementa Serial.printf nativo)
+void debugPrintf(const char *format, ...) {
+  char buffer[256];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(buffer, sizeof(buffer), format, args);
+  va_end(args);
+  Serial.print(buffer);
+}
 
 // Estructura estrictamente empaquetada (8 bytes)
 struct __attribute__((packed)) PaqueteControl {
@@ -213,7 +224,7 @@ void loop() {
 
     if (enFailsafe) {
       enFailsafe = false;
-      Serial.printf("[RESTAURADO] Enlace RF recuperado despues de %lu ms.\n", dt);
+      debugPrintf("[RESTAURADO] Enlace RF recuperado despues de %lu ms.\n", dt);
     }
 
     // Aplicar traccion y direccion
@@ -232,9 +243,9 @@ void loop() {
     actualS1 = s1_val; actualS2 = s2_val; actualS3 = s3_val; actualS4 = s4_val;
 
     // Log detallado de recepcion
-    Serial.printf("[RF_RX #%lu] dt:%lu ms | Cola:%d | TracIzq:%d | TracDer:%d | S:[%d°, %d°, %d°, %d°] | ",
-                  contadorPaquetesRx, dt, contadorCola, paquete.traccion_izq, paquete.traccion_der,
-                  s1_val, s2_val, s3_val, s4_val);
+    debugPrintf("[RF_RX #%lu] dt:%lu ms | Cola:%d | TracIzq:%d | TracDer:%d | S:[%d, %d, %d, %d] | ",
+                contadorPaquetesRx, dt, contadorCola, paquete.traccion_izq, paquete.traccion_der,
+                s1_val, s2_val, s3_val, s4_val);
     volcarPaqueteHex(paquete);
     Serial.println();
   }
@@ -245,7 +256,7 @@ void loop() {
   if (tiempoSinSenal > 500 && tiempoSinSenal <= TIMEOUT_MS) {
     if (ahora - ultimoAvisoWatchdog > 250) {
       ultimoAvisoWatchdog = ahora;
-      Serial.printf("[WATCHDOG_WARN] Sin paquetes RF hace %lu ms (umbral: %lu ms)...\n", tiempoSinSenal, TIMEOUT_MS);
+      debugPrintf("[WATCHDOG_WARN] Sin paquetes RF hace %lu ms (umbral: %lu ms)...\n", tiempoSinSenal, TIMEOUT_MS);
     }
   }
 
@@ -254,15 +265,15 @@ void loop() {
       enFailsafe = true;
       contadorActivacionesFailsafe++;
       pararMotores();
-      Serial.printf("🚨 [FAILSAFE ACTIVADO] Perdida de enlace RF (>%lu ms). MOTORES APAGADOS A 0.\n", TIMEOUT_MS);
+      debugPrintf("[FAILSAFE ACTIVADO] Perdida de enlace RF (>%lu ms). MOTORES APAGADOS A 0.\n", TIMEOUT_MS);
     }
   }
 
   // Estadisticas periodicas a 1 Hz
   if (ahora - ultimoReporteStats >= INTERVALO_STATS_MS) {
     ultimoReporteStats = ahora;
-    Serial.printf("[ESTADO_MKR] TotalRx:%lu | DescartadosFIFO:%lu | Failsafes:%lu | SinSenal:%lu ms | Estado:%s\n",
-                  contadorPaquetesRx, contadorPaquetesDescartados, contadorActivacionesFailsafe,
-                  tiempoSinSenal, enFailsafe ? "FAILSAFE (Frenado)" : "OPERATIVO");
+    debugPrintf("[ESTADO_MKR] TotalRx:%lu | DescartadosFIFO:%lu | Failsafes:%lu | SinSenal:%lu ms | Estado:%s\n",
+                contadorPaquetesRx, contadorPaquetesDescartados, contadorActivacionesFailsafe,
+                tiempoSinSenal, enFailsafe ? "FAILSAFE (Frenado)" : "OPERATIVO");
   }
 }
