@@ -17,10 +17,14 @@
  *    - Servomotor S1: Pin Digital 6
  *    - Servomotor S2: Pin Digital 7
  * =====================================================================================
- *  Instrucciones:
- *    1. Subir al Arduino MKR 1310 con Arduino IDE.
- *    2. Abrir Monitor Serie de Arduino IDE a 115200 baudios.
- *    3. Observar la confirmación inmediata de paquetes recibidos desde el ESP32.
+ *  Comandos interactivos desde Monitor Serie (115200 baudios):
+ *    'k' -> Alternar Auto-ACK (ON / OFF)
+ *    '1' -> Cambiar velocidad a 1 MBPS
+ *    '2' -> Cambiar velocidad a 250 KBPS (por defecto)
+ *    'c' -> Cambiar canal RF (108 <-> 76 <-> 90)
+ *    'p' -> Alternar potencia (LOW <-> MAX)
+ *    't' -> Test local de actuadores (gira motores y mueve servos por 1 seg)
+ *    '?' -> Imprimir configuración actual y menú de ayuda
  * =====================================================================================
  */
 
@@ -35,7 +39,7 @@
 RF24 radio(PIN_CE, PIN_CSN);
 const byte DIRECCION_RF[6] = "ROVER";
 
-// Estructura oficial de 6 bytes según AGENTS.md
+// Estructura oficial de 6 bytes según AGENTS.md (empaquetado estricto)
 struct __attribute__((packed)) PaqueteRover {
   int16_t traccion_izq;  // -255 a 255
   int16_t traccion_der;  // -255 a 255
@@ -43,20 +47,12 @@ struct __attribute__((packed)) PaqueteRover {
   uint8_t angulo_s2;     // 10 a 170
 };
 
-// Estructura de 8 bytes para compatibilidad si el emisor manda 4 servos
-struct __attribute__((packed)) PaqueteRover8 {
-  int16_t traccion_izq;
-  int16_t traccion_der;
-  uint8_t angulo_s1;
-  uint8_t angulo_s2;
-  uint8_t angulo_s3;
-  uint8_t angulo_s4;
-};
-
 // Prototipos explícitos para compatibilidad con preprocesador SAMD21
 void debugPrintf(const char *format, ...);
 void pararMotores();
 void aplicarControlMotores(int16_t pwmIzq, int16_t pwmDer);
+void imprimirConfiguracion();
+void procesarEntradaUsuario(char c);
 
 void debugPrintf(const char *format, ...) {
   char buffer[256];
@@ -78,11 +74,18 @@ const int pinA1B = 5;
 const int pinB1A = 3; 
 const int pinB1B = 4; 
 
+// Variables de estado
 unsigned long ultimaRecepcion = 0;
 const unsigned long TIMEOUT_MS = 1500;
 unsigned long contadorPaquetesRx = 0;
 bool radioOk = false;
 bool enFailsafe = false;
+
+// Opciones dinámicas de RF
+bool autoAckHabilitado = true;
+uint8_t canalActual = 108;
+rf24_datarate_e datarateActual = RF24_250KBPS;
+rf24_pa_dbm_e paActual = RF24_PA_LOW;
 
 void pararMotores() {
   analogWrite(pinA1A, 0);
@@ -129,6 +132,100 @@ void volcarHex(const void* ptr, size_t len) {
   Serial.print("]");
 }
 
+void testLocalActuadores() {
+  debugPrintf("\n[TEST ACTUADORES] Iniciando secuencia de prueba fisica...\n");
+  
+  // Test Servos
+  debugPrintf(" -> Moviendo Servos a 60° (Giro Derecha)...\n");
+  servo1.write(60);
+  servo2.write(60);
+  delay(500);
+
+  debugPrintf(" -> Moviendo Servos a 120° (Giro Izquierda)...\n");
+  servo1.write(120);
+  servo2.write(120);
+  delay(500);
+
+  debugPrintf(" -> Centrando Servos a 90°...\n");
+  servo1.write(90);
+  servo2.write(90);
+  delay(300);
+
+  // Test Motores
+  debugPrintf(" -> Probando Avance suave (PWM 120) por 400 ms...\n");
+  aplicarControlMotores(120, 120);
+  delay(400);
+
+  debugPrintf(" -> Probando Reversa suave (PWM -120) por 400 ms...\n");
+  aplicarControlMotores(-120, -120);
+  delay(400);
+
+  pararMotores();
+  debugPrintf(" -> Motores detenidos. Test completado exitosamente.\n\n");
+}
+
+void imprimirConfiguracion() {
+  debugPrintf("\n---------------- CONFIGURACION ACTUAL NRF24 ----------------\n");
+  debugPrintf("   Chip Conectado?: %s\n", radio.isChipConnected() ? "SI (SPI OK)" : "NO (¡REVISAR CABLES!)");
+  debugPrintf("   Canal RF:        %d (%d MHz)\n", canalActual, 2400 + canalActual);
+  debugPrintf("   Velocidad:       %s\n", datarateActual == RF24_250KBPS ? "250 KBPS" : "1 MBPS");
+  debugPrintf("   Auto-ACK:        %s\n", autoAckHabilitado ? "HABILITADO" : "DESHABILITADO (Broadcast)");
+  debugPrintf("   Potencia PA:     %s\n", paActual == RF24_PA_LOW ? "RF24_PA_LOW (Banco)" : "RF24_PA_MAX");
+  debugPrintf("   Tamano Trama:    %d Bytes FIJOS (Dynamic Payloads: OFF)\n", sizeof(PaqueteRover));
+  debugPrintf("   Pipe 1 RX:       \"ROVER\"\n");
+  debugPrintf("---------------- COMANDOS DISPONIBLES EN CONSOLA -----------\n");
+  debugPrintf("   'k' -> Toggle Auto-ACK | '1' -> 1 Mbps | '2' -> 250 Kbps\n");
+  debugPrintf("   'c' -> Rotar Canal     | 'p' -> Toggle PA Potencia\n");
+  debugPrintf("   't' -> Test Motores/Servos locales | '?' -> Ver este menu\n");
+  debugPrintf("------------------------------------------------------------\n\n");
+}
+
+void reconfigurarRadio() {
+  radio.stopListening();
+  radio.setChannel(canalActual);
+  radio.setDataRate(datarateActual);
+  radio.setPALevel(paActual);
+  radio.setAutoAck(autoAckHabilitado);
+  radio.setPayloadSize(sizeof(PaqueteRover));
+  radio.openReadingPipe(1, DIRECCION_RF);
+  radio.startListening();
+}
+
+void procesarEntradaUsuario(char c) {
+  c = tolower(c);
+  if (c == '\r' || c == '\n' || c == ' ') return;
+
+  if (c == 'k') {
+    autoAckHabilitado = !autoAckHabilitado;
+    reconfigurarRadio();
+    debugPrintf("\n[CONFIG] Auto-ACK cambiado a: %s\n", autoAckHabilitado ? "HABILITADO (Receptor envia ACK)" : "DESHABILITADO (Sin ACK)");
+  } else if (c == '1') {
+    datarateActual = RF24_1MBPS;
+    reconfigurarRadio();
+    debugPrintf("\n[CONFIG] Velocidad cambiada a: 1 MBPS (Mayor compatibilidad con clones Si24R1)\n");
+  } else if (c == '2') {
+    datarateActual = RF24_250KBPS;
+    reconfigurarRadio();
+    debugPrintf("\n[CONFIG] Velocidad cambiada a: 250 KBPS (Mayor alcance y sensibilidad)\n");
+  } else if (c == 'c') {
+    if (canalActual == 108) canalActual = 76;
+    else if (canalActual == 76) canalActual = 90;
+    else canalActual = 108;
+    reconfigurarRadio();
+    debugPrintf("\n[CONFIG] Canal RF cambiado a: %d (%d MHz)\n", canalActual, 2400 + canalActual);
+  } else if (c == 'p') {
+    paActual = (paActual == RF24_PA_LOW) ? RF24_PA_MAX : RF24_PA_LOW;
+    reconfigurarRadio();
+    debugPrintf("\n[CONFIG] Potencia PA cambiada a: %s\n", paActual == RF24_PA_LOW ? "RF24_PA_LOW" : "RF24_PA_MAX");
+  } else if (c == 't') {
+    testLocalActuadores();
+  } else if (c == '?' || c == 'h') {
+    imprimirConfiguracion();
+  } else {
+    debugPrintf("\n[AVISO] Tecla '%c' no reconocida. Use 'k', '1', '2', 'c', 'p', 't', o '?'.\n", c);
+  }
+}
+
 void setup() {
   Serial.begin(115200);
 
@@ -149,7 +246,6 @@ void setup() {
   delay(1000);
 
   Serial.println();
-  Serial.println();
   Serial.println("=================================================================");
   Serial.println("🤖  TEST RF RECEPTOR — ARDUINO MKR 1310 (MONITOR SERIE)          ");
   Serial.println("=================================================================");
@@ -164,21 +260,18 @@ void setup() {
     radioOk = false;
   } else {
     radioOk = true;
-    radio.setPayloadSize(sizeof(PaqueteRover)); // 6 bytes exactos
-    radio.enableDynamicPayloads();              // Aceptar también tramas de 8 bytes
-    radio.setPALevel(RF24_PA_LOW);             // Nivel bajo para mesa de pruebas
-    radio.setDataRate(RF24_250KBPS);           // 250 kbps
-    radio.setChannel(108);                     // Canal 108
-    radio.setAutoAck(true);                    // Auto-ACK habilitado
-    radio.openReadingPipe(1, DIRECCION_RF);    // Escuchando pipe "ROVER"
-    radio.startListening();                    // Modo Receptor
 
-    Serial.println("✅ NRF24L01 configurado y escuchando correctamente!");
-    Serial.print("   -> Chip Conectado?: ");
-    Serial.println(radio.isChipConnected() ? "SI (SPI Hardware OK)" : "NO (Revisar cables)");
-    Serial.println("   -> Canal: 108 (2.508 GHz) | Velocidad: 250 KBPS");
-    Serial.println("   -> Escuchando en Pipe 1 con direccion: \"ROVER\"");
-    Serial.println("-----------------------------------------------------------------");
+    // Configuración estricta de tamaño fijo (6 bytes)
+    radio.setPayloadSize(sizeof(PaqueteRover)); // 6 bytes exactos
+    // NOTA CLAVE: Dynamic Payloads se deja DESHABILITADO para máxima robustez con clones
+    radio.setPALevel(paActual);
+    radio.setDataRate(datarateActual);
+    radio.setChannel(canalActual);
+    radio.setAutoAck(autoAckHabilitado);
+    radio.openReadingPipe(1, DIRECCION_RF);
+    radio.startListening();
+
+    imprimirConfiguracion();
     Serial.println("Esperando paquetes transmitidos desde el ESP32...");
     Serial.println("=================================================================");
   }
@@ -189,22 +282,18 @@ void setup() {
 void loop() {
   unsigned long ahora = millis();
 
+  // Escucha de comandos de depuración desde el Monitor Serie de Arduino IDE
+  while (Serial.available() > 0) {
+    procesarEntradaUsuario((char)Serial.read());
+  }
+
+  // Recepción RF
   if (radioOk && radio.available()) {
     PaqueteRover paqueteRecibido = {0, 0, 90, 90};
-    uint8_t len = radio.getDynamicPayloadSize();
 
-    if (len == sizeof(PaqueteRover)) {
+    // Drenar el búfer leyendo el paquete más reciente (regla AGENTS.md 5.3.2)
+    while (radio.available()) {
       radio.read(&paqueteRecibido, sizeof(PaqueteRover));
-    } else if (len == sizeof(PaqueteRover8)) {
-      PaqueteRover8 p8;
-      radio.read(&p8, sizeof(PaqueteRover8));
-      paqueteRecibido.traccion_izq = p8.traccion_izq;
-      paqueteRecibido.traccion_der = p8.traccion_der;
-      paqueteRecibido.angulo_s1 = p8.angulo_s1;
-      paqueteRecibido.angulo_s2 = p8.angulo_s2;
-    } else {
-      radio.flush_rx();
-      return;
     }
 
     unsigned long dt = ahora - ultimaRecepcion;
@@ -213,7 +302,7 @@ void loop() {
 
     if (enFailsafe) {
       enFailsafe = false;
-      debugPrintf("\n[ENLACE RECUPERADO] Comunicacion restablecida despues de %lu ms!\n", dt);
+      debugPrintf("\n🎉 [ENLACE RECUPERADO] Comunicacion restablecida despues de %lu ms!\n", dt);
     }
 
     // Aplicar a actuadores

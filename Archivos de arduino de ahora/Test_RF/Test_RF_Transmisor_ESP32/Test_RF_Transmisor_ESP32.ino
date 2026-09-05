@@ -13,16 +13,19 @@
  *    - MISO: GPIO 5
  *    - LED:  GPIO 8 (LED azul en placa, activo en LOW)
  * =====================================================================================
- *  Instrucciones:
- *    1. Subir al ESP32-C3 con Arduino IDE (Herramientas -> USB CDC On Boot: "Enabled").
- *    2. Abrir Monitor Serie de Arduino IDE a 115200 baudios (ajustar a "Ambos NL y CR").
- *    3. Escribir comandos en el monitor:
- *         'w' -> Avance (PWM 200, Servos 90°)
- *         's' -> Reversa (PWM -200, Servos 90°)
- *         'a' -> Giro Izquierda (PWM 150, Servos 120°)
- *         'd' -> Giro Derecha (PWM 150, Servos 60°)
- *         'x' -> Parada (PWM 0, Servos 90°)
- *         'p' -> Alternar potencia (LOW <-> MAX)
+ *  Comandos interactivos desde Monitor Serie (115200 baudios):
+ *    'w' -> Avance (PWM 200, Servos 90°)
+ *    's' -> Reversa (PWM -200, Servos 90°)
+ *    'a' -> Giro Izquierda (PWM 150, Servos 120°)
+ *    'd' -> Giro Derecha (PWM 150, Servos 60°)
+ *    'x' -> Parada (PWM 0, Servos 90°)
+ *    'k' -> Alternar Auto-ACK (ON / OFF)
+ *    '1' -> Cambiar velocidad a 1 MBPS
+ *    '2' -> Cambiar velocidad a 250 KBPS (por defecto)
+ *    'c' -> Cambiar canal RF (108 <-> 76 <-> 90)
+ *    'p' -> Alternar potencia (LOW <-> MAX)
+ *    'm' -> Alternar envío periódico automático de 1 Hz (ON / OFF)
+ *    '?' -> Imprimir configuración actual y menú de ayuda
  * =====================================================================================
  */
 
@@ -62,9 +65,15 @@ unsigned long contadorExitos = 0;
 unsigned long contadorFallos = 0;
 unsigned long ultimoEnvioAuto = 0;
 const unsigned long INTERVALO_AUTO_MS = 1000; // Envío automático cada 1 seg
+bool envioAutoHabilitado = true;
 
 bool radioOk = false;
-bool potenciaAlta = false;
+
+// Opciones dinámicas de RF
+bool autoAckHabilitado = true;
+uint8_t canalActual = 108;
+rf24_datarate_e datarateActual = RF24_250KBPS;
+rf24_pa_dbm_e paActual = RF24_PA_LOW;
 
 void imprimir(const char *format, ...) {
   char buf[256];
@@ -79,6 +88,38 @@ void imprimir(const char *format, ...) {
 #endif
 }
 
+void imprimirConfiguracion() {
+  imprimir("\n---------------- CONFIGURACION ACTUAL TRANSMISOR ESP32 ----------------\n");
+  imprimir("   Chip Conectado?: %s\n", radio.isChipConnected() ? "SI (SPI OK)" : "NO (¡REVISAR CABLES!)");
+  imprimir("   Canal RF:        %d (%d MHz)\n", canalActual, 2400 + canalActual);
+  imprimir("   Velocidad:       %s\n", datarateActual == RF24_250KBPS ? "250 KBPS" : "1 MBPS");
+  imprimir("   Auto-ACK:        %s\n", autoAckHabilitado ? "HABILITADO" : "DESHABILITADO (Broadcast)");
+  imprimir("   Potencia PA:     %s\n", paActual == RF24_PA_LOW ? "RF24_PA_LOW (Banco)" : "RF24_PA_MAX");
+  imprimir("   Tamano Trama:    %d Bytes FIJOS (Dynamic Payloads: OFF)\n", sizeof(PaqueteRover));
+  imprimir("   Pipe TX:         \"ROVER\"\n");
+  imprimir("   Envio Auto 1Hz:  %s\n", envioAutoHabilitado ? "ACTIVO" : "PAUSADO");
+  imprimir("   Estadisticas:    Total TX:%lu | Exitos (ACK):%lu | Fallos:%lu\n",
+           contadorEnvios, contadorExitos, contadorFallos);
+  imprimir("---------------- COMANDOS DISPONIBLES EN CONSOLA ----------------------\n");
+  imprimir("   'w','s','a','d','x' -> Conducir Rover\n");
+  imprimir("   'k' -> Toggle Auto-ACK | '1' -> 1 Mbps | '2' -> 250 Kbps\n");
+  imprimir("   'c' -> Rotar Canal     | 'p' -> Toggle PA Potencia\n");
+  imprimir("   'm' -> Toggle Auto-TX  | '?' -> Ver este menu\n");
+  imprimir("-----------------------------------------------------------------------\n\n");
+}
+
+void reconfigurarRadio() {
+  radio.setChannel(canalActual);
+  radio.setDataRate(datarateActual);
+  radio.setPALevel(paActual);
+  radio.setAutoAck(autoAckHabilitado);
+  radio.setPayloadSize(sizeof(PaqueteRover));
+  // A 250kbps el delay de reintento debe ser >= 1500us; usamos 15*250us = 4000us para evitar colisiones con ACK
+  radio.setRetries(15, 15);
+  radio.openWritingPipe(DIRECCION_RF);
+  radio.stopListening();
+}
+
 void enviarTramaRF() {
   contadorEnvios++;
 
@@ -88,15 +129,24 @@ void enviarTramaRF() {
   unsigned long dt = micros() - t0;
   digitalWrite(PIN_LED, HIGH);
 
-  if (exito) {
+  if (autoAckHabilitado) {
+    if (exito) {
+      contadorExitos++;
+      imprimir("   ✅ [TX #%lu OK] ACK recibido del MKR! (dt: %lu us) | Trac:[%d, %d] | S:[%d, %d]\n",
+               contadorEnvios, dt, datosPrueba.traccion_izq, datosPrueba.traccion_der,
+               datosPrueba.angulo_s1, datosPrueba.angulo_s2);
+    } else {
+      contadorFallos++;
+      imprimir("   ❌ [TX #%lu FALLO] Sin ACK del MKR (dt: %lu us) | ¿MKR encendido y en canal %d?\n"
+               "      -> Tip: Si el MKR no responde con ACK, presione 'k' en ambos monitores para probar enlace sin ACK,\n"
+               "              o presione '1' en ambos para probar 1 Mbps (modo nativo de clones Si24R1).\n",
+               contadorEnvios, dt, canalActual);
+    }
+  } else {
     contadorExitos++;
-    imprimir("   ✅ [TX #%lu OK] ACK recibido del MKR! (dt: %lu us) | Trac:[%d, %d] | S:[%d, %d]\n",
+    imprimir("   📡 [TX #%lu ENVIADO] Transmitido sin esperar ACK (dt: %lu us) | Trac:[%d, %d] | S:[%d, %d]\n",
              contadorEnvios, dt, datosPrueba.traccion_izq, datosPrueba.traccion_der,
              datosPrueba.angulo_s1, datosPrueba.angulo_s2);
-  } else {
-    contadorFallos++;
-    imprimir("   ❌ [TX #%lu FALLO] Sin ACK del MKR (dt: %lu us) | ¿MKR encendido y en canal 108?\n",
-             contadorEnvios, dt);
   }
 }
 
@@ -104,50 +154,71 @@ void procesarEntradaUsuario(char c) {
   c = tolower(c);
   if (c == '\r' || c == '\n' || c == ' ') return;
 
-  imprimir("\n[TECLADO] Comando recibido: '%c' -> ", c);
-
   if (c == 'w') {
     datosPrueba.traccion_izq = 200;
     datosPrueba.traccion_der = 200;
     datosPrueba.angulo_s1 = 90;
     datosPrueba.angulo_s2 = 90;
-    imprimir("AVANCE ADELANTE (PWM: 200, Servos: 90°)\n");
+    imprimir("\n[TECLADO] 'w' -> AVANCE ADELANTE (PWM: 200, Servos: 90°)\n");
+    enviarTramaRF();
   } else if (c == 's') {
     datosPrueba.traccion_izq = -200;
     datosPrueba.traccion_der = -200;
     datosPrueba.angulo_s1 = 90;
     datosPrueba.angulo_s2 = 90;
-    imprimir("REVERSA (PWM: -200, Servos: 90°)\n");
+    imprimir("\n[TECLADO] 's' -> REVERSA (PWM: -200, Servos: 90°)\n");
+    enviarTramaRF();
   } else if (c == 'a') {
     datosPrueba.traccion_izq = 150;
     datosPrueba.traccion_der = 150;
     datosPrueba.angulo_s1 = 120;
     datosPrueba.angulo_s2 = 120;
-    imprimir("GIRO IZQUIERDA (PWM: 150, Servos: 120°)\n");
+    imprimir("\n[TECLADO] 'a' -> GIRO IZQUIERDA (PWM: 150, Servos: 120°)\n");
+    enviarTramaRF();
   } else if (c == 'd') {
     datosPrueba.traccion_izq = 150;
     datosPrueba.traccion_der = 150;
     datosPrueba.angulo_s1 = 60;
     datosPrueba.angulo_s2 = 60;
-    imprimir("GIRO DERECHA (PWM: 150, Servos: 60°)\n");
+    imprimir("\n[TECLADO] 'd' -> GIRO DERECHA (PWM: 150, Servos: 60°)\n");
+    enviarTramaRF();
   } else if (c == 'x') {
     datosPrueba.traccion_izq = 0;
     datosPrueba.traccion_der = 0;
     datosPrueba.angulo_s1 = 90;
     datosPrueba.angulo_s2 = 90;
-    imprimir("PARADA (PWM: 0, Servos: 90°)\n");
+    imprimir("\n[TECLADO] 'x' -> PARADA (PWM: 0, Servos: 90°)\n");
+    enviarTramaRF();
+  } else if (c == 'k') {
+    autoAckHabilitado = !autoAckHabilitado;
+    reconfigurarRadio();
+    imprimir("\n[CONFIG] Auto-ACK cambiado a: %s\n", autoAckHabilitado ? "HABILITADO (Espera confirmacion)" : "DESHABILITADO (Transmision ciega)");
+  } else if (c == '1') {
+    datarateActual = RF24_1MBPS;
+    reconfigurarRadio();
+    imprimir("\n[CONFIG] Velocidad cambiada a: 1 MBPS (Mayor compatibilidad con clones Si24R1)\n");
+  } else if (c == '2') {
+    datarateActual = RF24_250KBPS;
+    reconfigurarRadio();
+    imprimir("\n[CONFIG] Velocidad cambiada a: 250 KBPS (Mayor alcance y sensibilidad)\n");
+  } else if (c == 'c') {
+    if (canalActual == 108) canalActual = 76;
+    else if (canalActual == 76) canalActual = 90;
+    else canalActual = 108;
+    reconfigurarRadio();
+    imprimir("\n[CONFIG] Canal RF cambiado a: %d (%d MHz)\n", canalActual, 2400 + canalActual);
   } else if (c == 'p') {
-    potenciaAlta = !potenciaAlta;
-    radio.setPALevel(potenciaAlta ? RF24_PA_MAX : RF24_PA_LOW);
-    imprimir("POTENCIA CAMBIADA A: %s\n", potenciaAlta ? "RF24_PA_MAX (Máximo alcance)" : "RF24_PA_LOW (Banco de trabajo)");
-    return;
+    paActual = (paActual == RF24_PA_LOW) ? RF24_PA_MAX : RF24_PA_LOW;
+    reconfigurarRadio();
+    imprimir("\n[CONFIG] Potencia PA cambiada a: %s\n", paActual == RF24_PA_LOW ? "RF24_PA_LOW" : "RF24_PA_MAX");
+  } else if (c == 'm') {
+    envioAutoHabilitado = !envioAutoHabilitado;
+    imprimir("\n[CONFIG] Envio automatico 1Hz: %s\n", envioAutoHabilitado ? "ACTIVADO" : "PAUSADO");
+  } else if (c == '?' || c == 'h') {
+    imprimirConfiguracion();
   } else {
-    imprimir("Comando no reconocido. Use w, s, a, d, x, p.\n");
-    return;
+    imprimir("\n[AVISO] Tecla '%c' no reconocida. Use 'w','s','a','d','x','k','1','2','c','p','m' o '?'.\n", c);
   }
-
-  // Enviar inmediatamente tras pulsar la tecla
-  enviarTramaRF();
 }
 
 void setup() {
@@ -187,22 +258,10 @@ void setup() {
     radioOk = false;
   } else {
     radioOk = true;
-    radio.setPayloadSize(sizeof(PaqueteRover)); // 6 bytes exactos
-    radio.setPALevel(RF24_PA_LOW);              // LOW para evitar saturación en mesa
-    radio.setDataRate(RF24_250KBPS);            // 250 kbps
-    radio.setChannel(108);                      // Canal 108 (2.508 GHz)
-    radio.setAutoAck(true);                     // Esperar confirmación ACK
-    radio.setRetries(5, 15);                    // 5x250us delay, 15 reintentos
-    radio.openWritingPipe(DIRECCION_RF);        // Pipe "ROVER"
-    radio.stopListening();                      // Modo Transmisor
+    reconfigurarRadio();
 
     imprimir("✅ NRF24L01 detectado y configurado correctamente!\n");
-    imprimir("   -> Chip Conectado?: %s\n", radio.isChipConnected() ? "SI (SPI Hardware OK)" : "NO (Revisar cables)");
-    imprimir("   -> Canal: 108 | Velocidad: 250 KBPS | Potencia: RF24_PA_LOW\n");
-    imprimir("   -> Direccion Pipe TX: \"ROVER\" | Paquete: %d Bytes\n", sizeof(PaqueteRover));
-    imprimir("-----------------------------------------------------------------\n");
-    imprimir("Escriba en este monitor: 'w', 's', 'a', 'd', 'x' para comandar.\n");
-    imprimir("Se enviara un paquete automatico cada 1 segundo.\n");
+    imprimirConfiguracion();
     imprimir("=================================================================\n\n");
   }
 
@@ -223,7 +282,7 @@ void loop() {
   unsigned long ahora = millis();
 
   // Envío periódico automático de prueba a 1 Hz
-  if (radioOk && (ahora - ultimoEnvioAuto >= INTERVALO_AUTO_MS)) {
+  if (radioOk && envioAutoHabilitado && (ahora - ultimoEnvioAuto >= INTERVALO_AUTO_MS)) {
     ultimoEnvioAuto = ahora;
     enviarTramaRF();
   }
