@@ -30,16 +30,6 @@
 RF24 radio(PIN_CE, PIN_CSN);
 const byte DIRECCION_RF[6] = "ROVER";
 
-// Helper printf para Arduino SAMD21 (el core SAMD no implementa Serial.printf nativo)
-void debugPrintf(const char *format, ...) {
-  char buffer[256];
-  va_list args;
-  va_start(args, format);
-  vsnprintf(buffer, sizeof(buffer), format, args);
-  va_end(args);
-  Serial.print(buffer);
-}
-
 // Estructura estrictamente empaquetada (8 bytes)
 struct __attribute__((packed)) PaqueteControl {
   int16_t traccion_izq;  // -255 a 255 (Lado Izquierdo)
@@ -49,6 +39,20 @@ struct __attribute__((packed)) PaqueteControl {
   uint8_t angulo_s3;     // S3: Trasero Izq
   uint8_t angulo_s4;     // S4: Trasero Der
 };
+
+// Prototipos explícitos para el preprocesador de Arduino
+void volcarPaqueteHex(const PaqueteControl &p);
+void debugPrintf(const char *format, ...);
+
+// Helper printf para Arduino SAMD21 (el core SAMD no implementa Serial.printf nativo)
+void debugPrintf(const char *format, ...) {
+  char buffer[256];
+  va_list args;
+  va_start(args, format);
+  vsnprintf(buffer, sizeof(buffer), format, args);
+  va_end(args);
+  Serial.print(buffer);
+}
 
 // Servos de Direccion
 Servo servo1;
