@@ -133,23 +133,28 @@ struct __attribute__((packed)) Paquete {
 ```text
 hmi_rover_cepit/
 ├── AGENTS.md                                # Este documento de referencia y contexto
-├── Lanzar_HMI_Rover.bat                     # Lanzador Windows de la interfaz Python
+├── ESQUEMATICO_MKR1310.md                   # Esquemático completo de conexiones y pinout del MKR
+├── Lanzar_HMI_Rover.bat                     # Lanzador Windows de la interfaz Python normal
+├── Lanzar_HMI_Debug.bat                     # Lanzador Windows de la interfaz Python modo DEBUG
 ├── WindowsFormsApp4/                        # Interfaz gráfica de telemetría en C# (.NET)
 ├── WindowsFormsApp4.slnx                    # Archivo de solución de Visual Studio
 ├── Archivos de arduino de ahora/
 │   ├── Contexto actual.docx                 # Documento técnico original del equipo
 │   ├── Codigo_MKR_28-8/                     # Código de referencia preliminar para MKR
 │   ├── Control/                             # Códigos para el módulo Transmisor (ESP32-C3)
+│   │   ├── Control_ESP32_C3_Debug/          # Versión DEBUG con telemetría RF y volcado HEX
 │   │   ├── Control_ESP32_C3_Optimizado/     # Versión optimizada de transmisión
 │   │   ├── Control_LOLIN-C3-MINI/           # Versión base LOLIN C3 Mini
 │   │   ├── Control_LOLIN-C3-MINI-v0.2/
 │   │   └── Control_LOLIN_C3_MINI-v0.1/
 │   ├── Ejecutor/                            # Códigos para el módulo Receptor (Arduino MKR 1310)
+│   │   ├── Ejecutor_ArduinoMKR_Debug/       # Versión DEBUG con reporte de FIFO, actuadores y watchdog
 │   │   ├── Ejecutor_ArduinoMKR_Optimizado/  # Versión optimizada con failsafe y vaciado de búfer
 │   │   ├── Ejecutor_ArduinoMKR/             # Versión base
 │   │   └── Ejecutor_ArduinoMKR-v0.1/
 │   └── Interfaz/                            # Scripts de interfaz HMI en Python
-│       ├── HMI_Rover_V2.py                  # Script principal actual con GUI y sliders
+│       ├── HMI_Rover_Debug.py               # Script HMI DEBUG con visor de tramas TX/RX en tiempo real
+│       ├── HMI_Rover_V2.py                  # Script principal estándar con GUI y sliders
 │       ├── Interfaz-Rover-29-8-v2.py
 │       ├── Interfaz-Rover-29-8-v3.py
 │       └── Interfaz-Rover_29-8.py
