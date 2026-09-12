@@ -95,6 +95,20 @@ class HMIRoverDebug:
         self.servos_360 = tk.BooleanVar(value=False)
         self.sliders_servos = {}
 
+        # Conexión Serial Joystick Físico (Arduino Nano)
+        self.serial_joy = None
+        self.conectado_joy = False
+        self.hilo_joy = None
+        self.joy_data = {
+            's1_x': 0, 's1_y': 0,
+            's2_x': 0, 's2_y': 0,
+            'pot': 150,
+            'sw1': 0, 'sw2': 0, 'estop': 0, 's360': 0, 'q': 0, 'e': 0
+        }
+        self.ultimo_joy_sw1 = 0
+        self.ultimo_joy_estop = 0
+        self.ultimo_joy_360 = 0
+
         # Estado Snapshot TX (último enviado)
         self.snapshot_tx = {
             'cmd': 'STOP', 'izq': 0, 'der': 0,
@@ -290,6 +304,79 @@ class HMIRoverDebug:
         tk.Checkbutton(frm_s_btns, text="Servos 360°", variable=self.servos_360,
                        bg="#151824", fg="#00f5d4", selectcolor="#0c0e17", font=("Segoe UI", 8, "bold"),
                        command=self.actualizar_rango_servos).pack(side="right", padx=(4, 0))
+
+        # --- PANEL JOYSTICK FÍSICO (NANO) ---
+        card_joy = ttk.Frame(col_izq, style="Card.TFrame", padding=8)
+        card_joy.pack(fill="x", pady=(0, 6))
+
+        frm_joy_top = ttk.Frame(card_joy, style="Card.TFrame")
+        frm_joy_top.pack(fill="x", pady=(0, 4))
+
+        ttk.Label(frm_joy_top, text="🎮 JOYSTICK (NANO):", style="Header.TLabel").pack(side="left", padx=(0, 4))
+        self.cb_puertos_joy = ttk.Combobox(frm_joy_top, width=8, state="readonly")
+        self.cb_puertos_joy.pack(side="left", padx=2)
+
+        self.btn_conectar_joy = tk.Button(frm_joy_top, text="Conectar Joy", bg="#00f5d4", fg="#0c0e17",
+                                          font=("Segoe UI", 8, "bold"), command=self.toggle_conexion_joy, relief="flat", padx=5)
+        self.btn_conectar_joy.pack(side="left", padx=3)
+
+        self.lbl_badge_joy = tk.Label(frm_joy_top, text="🔴 OFF", bg="#2a2e3f", fg="#f87171",
+                                      font=("Segoe UI", 8, "bold"), padx=6, pady=1)
+        self.lbl_badge_joy.pack(side="left", padx=3)
+
+        # Body: sticks 2D canvases + pot and buttons
+        frm_joy_body = ttk.Frame(card_joy, style="Card.TFrame")
+        frm_joy_body.pack(fill="x", pady=2)
+
+        # Stick 1 (L)
+        frm_s1 = ttk.Frame(frm_joy_body, style="Card.TFrame")
+        frm_s1.pack(side="left", padx=(0, 8))
+        ttk.Label(frm_s1, text="STICK 1 (L)", font=("Segoe UI", 8, "bold"), style="SubHeader.TLabel").pack(anchor="center")
+        self.canvas_joy_s1 = tk.Canvas(frm_s1, width=64, height=64, bg="#08090f", highlightthickness=1, highlightbackground="#334155")
+        self.canvas_joy_s1.pack(anchor="center", pady=1)
+        self.lbl_joy_s1 = ttk.Label(frm_s1, text="X: 0% | Y: 0%", font=("Consolas", 7), style="SubHeader.TLabel")
+        self.lbl_joy_s1.pack(anchor="center")
+
+        # Stick 2 (R)
+        frm_s2 = ttk.Frame(frm_joy_body, style="Card.TFrame")
+        frm_s2.pack(side="left", padx=(0, 8))
+        ttk.Label(frm_s2, text="STICK 2 (R)", font=("Segoe UI", 8, "bold"), style="SubHeader.TLabel").pack(anchor="center")
+        self.canvas_joy_s2 = tk.Canvas(frm_s2, width=64, height=64, bg="#08090f", highlightthickness=1, highlightbackground="#334155")
+        self.canvas_joy_s2.pack(anchor="center", pady=1)
+        self.lbl_joy_s2 = ttk.Label(frm_s2, text="X: 0% | Y: 0%", font=("Consolas", 7), style="SubHeader.TLabel")
+        self.lbl_joy_s2.pack(anchor="center")
+
+        # Controls & Badges
+        frm_joy_ctrls = ttk.Frame(frm_joy_body, style="Card.TFrame")
+        frm_joy_ctrls.pack(side="left", fill="both", expand=True)
+
+        ttk.Label(frm_joy_ctrls, text="POTENCIÓMETRO:", font=("Segoe UI", 8, "bold"), style="SubHeader.TLabel").pack(anchor="w")
+        self.lbl_joy_pot = ttk.Label(frm_joy_ctrls, text="Pot: 150 / 255 (59%)", style="Value.TLabel")
+        self.lbl_joy_pot.pack(anchor="w", pady=(0, 2))
+
+        frm_badges = ttk.Frame(frm_joy_ctrls, style="Card.TFrame")
+        frm_badges.pack(anchor="w", fill="x")
+
+        self.badge_btn_modo = tk.Label(frm_badges, text="MODO", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
+        self.badge_btn_modo.pack(side="left", padx=1)
+
+        self.badge_btn_centrar = tk.Label(frm_badges, text="90°", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
+        self.badge_btn_centrar.pack(side="left", padx=1)
+
+        self.badge_btn_360 = tk.Label(frm_badges, text="360°", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
+        self.badge_btn_360.pack(side="left", padx=1)
+
+        self.badge_btn_q = tk.Label(frm_badges, text="↺ Q", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
+        self.badge_btn_q.pack(side="left", padx=1)
+
+        self.badge_btn_e = tk.Label(frm_badges, text="↻ E", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
+        self.badge_btn_e.pack(side="left", padx=1)
+
+        self.badge_btn_estop = tk.Label(frm_badges, text="ESTOP", bg="#334155", fg="#f87171", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
+        self.badge_btn_estop.pack(side="left", padx=1)
+
+        self.dibujar_stick_neutro(self.canvas_joy_s1)
+        self.dibujar_stick_neutro(self.canvas_joy_s2)
 
         # --- PANEL DERECHO: DOBLE ESQUEMA 2D (TX vs RX) ---
         card_dual_esquema = ttk.Frame(col_der, style="Card.TFrame", padding=8)
@@ -570,12 +657,16 @@ class HMIRoverDebug:
         if not SERIAL_DISPONIBLE:
             self.cb_puerto_tx['values'] = ["Sin pyserial"]
             self.cb_puerto_rx['values'] = ["Sin pyserial"]
+            if hasattr(self, 'cb_puertos_joy'):
+                self.cb_puertos_joy['values'] = ["Sin pyserial"]
             return
 
         puertos = [p.device for p in serial.tools.list_ports.comports()]
         if puertos:
             self.cb_puerto_tx['values'] = puertos
             self.cb_puerto_rx['values'] = puertos
+            if hasattr(self, 'cb_puertos_joy'):
+                self.cb_puertos_joy['values'] = puertos
 
             if not self.cb_puerto_tx.get() or self.cb_puerto_tx.get() not in puertos:
                 self.cb_puerto_tx.set(puertos[0])
@@ -583,9 +674,19 @@ class HMIRoverDebug:
                 self.cb_puerto_rx.set(puertos[1])
             elif not self.cb_puerto_rx.get() or self.cb_puerto_rx.get() not in puertos:
                 self.cb_puerto_rx.set(puertos[0])
+
+            if hasattr(self, 'cb_puertos_joy'):
+                if len(puertos) > 2 and (not self.cb_puertos_joy.get() or self.cb_puertos_joy.get() not in puertos):
+                    self.cb_puertos_joy.set(puertos[2])
+                elif len(puertos) > 1 and (not self.cb_puertos_joy.get() or self.cb_puertos_joy.get() not in puertos):
+                    self.cb_puertos_joy.set(puertos[1])
+                elif not self.cb_puertos_joy.get() or self.cb_puertos_joy.get() not in puertos:
+                    self.cb_puertos_joy.set(puertos[0])
         else:
             self.cb_puerto_tx['values'] = ["Sin puertos"]
             self.cb_puerto_rx['values'] = ["Sin puertos"]
+            if hasattr(self, 'cb_puertos_joy'):
+                self.cb_puertos_joy['values'] = ["Sin puertos"]
 
     def toggle_conexion_tx(self):
         if not SERIAL_DISPONIBLE:
@@ -712,6 +813,196 @@ class HMIRoverDebug:
 
         self.hilo_rx = threading.Thread(target=self.bucle_lectura_rx, daemon=True)
         self.hilo_rx.start()
+
+        self.hilo_joy = threading.Thread(target=self.bucle_lectura_joy, daemon=True)
+        self.hilo_joy.start()
+
+    def dibujar_stick_neutro(self, canvas):
+        canvas.delete("all")
+        cx, cy = 32, 32
+        canvas.create_line(cx, 4, cx, 60, fill="#2a2e3f", dash=(2, 2))
+        canvas.create_line(4, cy, 60, cy, fill="#2a2e3f", dash=(2, 2))
+        canvas.create_oval(cx - 4, cy - 4, cx + 4, cy + 4, fill="#00f5d4", outline="#ffffff", width=1)
+
+    def actualizar_stick_canvas(self, canvas, nx, ny, color="#00f5d4"):
+        canvas.delete("all")
+        cx, cy = 32, 32
+        canvas.create_line(cx, 4, cx, 60, fill="#2a2e3f", dash=(2, 2))
+        canvas.create_line(4, cy, 60, cy, fill="#2a2e3f", dash=(2, 2))
+        px = cx + int((nx / 100.0) * 24)
+        py = cy - int((ny / 100.0) * 24)
+        canvas.create_oval(px - 4, py - 4, px + 4, py + 4, fill=color, outline="#ffffff", width=1)
+
+    def toggle_conexion_joy(self):
+        if not SERIAL_DISPONIBLE:
+            messagebox.showerror("Error", "Librería pyserial no instalada.")
+            return
+
+        if self.conectado_joy:
+            self.conectado_joy = False
+            if self.serial_joy and self.serial_joy.is_open:
+                try:
+                    self.serial_joy.close()
+                except:
+                    pass
+            self.btn_conectar_joy.config(text="Conectar Joy", bg="#00f5d4", fg="#0c0e17")
+            self.lbl_badge_joy.config(text="🔴 OFF", bg="#2a2e3f", fg="#f87171")
+            self.dibujar_stick_neutro(self.canvas_joy_s1)
+            self.dibujar_stick_neutro(self.canvas_joy_s2)
+            self.log_consola("SYS", "Joystick Nano desconectado.")
+        else:
+            p = self.cb_puertos_joy.get()
+            if not p or p in ["Sin puertos", "Sin pyserial"]:
+                messagebox.showwarning("Atención", "Seleccione un puerto COM válido para el Joystick.")
+                return
+            try:
+                self.serial_joy = serial.Serial()
+                self.serial_joy.port = p
+                self.serial_joy.baudrate = 115200
+                self.serial_joy.timeout = 0.05
+                self.serial_joy.dtr = True
+                self.serial_joy.rts = False
+                self.serial_joy.open()
+                self.conectado_joy = True
+                self.btn_conectar_joy.config(text="Desconectar Joy", bg="#e63946", fg="#ffffff")
+                self.lbl_badge_joy.config(text=f"🟢 {p}", bg="#064e3b", fg="#34d399")
+                self.log_consola("SYS", f"Joystick físico conectado en {p} @ 115200 bps.")
+            except Exception as e:
+                self.conectado_joy = False
+                messagebox.showerror("Error Joystick", f"No se pudo conectar a {p}:\n{e}")
+
+    def bucle_lectura_joy(self):
+        while self.ejecutando:
+            if self.conectado_joy and self.serial_joy and self.serial_joy.is_open:
+                try:
+                    linea = self.serial_joy.readline().decode('utf-8', errors='ignore').strip()
+                    if linea.startswith("JOY:"):
+                        self.procesar_trama_joystick(linea[4:])
+                except:
+                    pass
+            time.sleep(0.015)
+
+    def procesar_trama_joystick(self, datos_str):
+        try:
+            partes = datos_str.split(',')
+            if len(partes) >= 11:
+                s1_x = int(partes[0])
+                s1_y = int(partes[1])
+                s2_x = int(partes[2])
+                s2_y = int(partes[3])
+                master_pwm = int(partes[4])
+                sw1 = int(partes[5])
+                sw2 = int(partes[6])
+                estop = int(partes[7])
+                s360 = int(partes[8])
+                piv_izq = int(partes[9])
+                piv_der = int(partes[10])
+
+                self.root.after(0, self.actualizar_ui_joystick, s1_x, s1_y, s2_x, s2_y, master_pwm,
+                                sw1, sw2, estop, s360, piv_izq, piv_der)
+        except Exception:
+            pass
+
+    def actualizar_ui_joystick(self, s1_x, s1_y, s2_x, s2_y, pot, sw1, sw2, estop, s360, piv_izq, piv_der):
+        self.actualizar_stick_canvas(self.canvas_joy_s1, s1_x, s1_y, "#00f5d4")
+        self.lbl_joy_s1.config(text=f"X: {s1_x:+d}% | Y: {s1_y:+d}%")
+
+        self.actualizar_stick_canvas(self.canvas_joy_s2, s2_x, s2_y, "#fbbf24")
+        self.lbl_joy_s2.config(text=f"X: {s2_x:+d}% | Y: {s2_y:+d}%")
+
+        pct = int((pot / 255.0) * 100)
+        self.lbl_joy_pot.config(text=f"Pot: {pot} / 255 ({pct}%)")
+
+        if abs(self.master_izq.get() - pot) > 2:
+            self.master_izq.set(pot)
+            self.master_der.set(pot)
+            self.actualizar_labels_trim()
+            if self.conectado_tx and self.comando_actual != "STOP":
+                self.enviar_trama_actual()
+            self.actualizar_grafico_tx()
+
+        c_off, c_on = "#334155", "#00f5d4"
+        fg_off, fg_on = "#94a3b8", "#0f172a"
+
+        self.badge_btn_modo.config(bg=c_on if sw1 else c_off, fg=fg_on if sw1 else fg_off,
+                                   text="CANGREJO" if sw1 else "ACKERM")
+        self.badge_btn_centrar.config(bg=c_on if sw2 else c_off, fg=fg_on if sw2 else fg_off)
+        self.badge_btn_360.config(bg="#ff9f1c" if s360 else c_off, fg=fg_on if s360 else fg_off)
+        self.badge_btn_q.config(bg=c_on if piv_izq else c_off, fg=fg_on if piv_izq else fg_off)
+        self.badge_btn_e.config(bg=c_on if piv_der else c_off, fg=fg_on if piv_der else fg_off)
+        self.badge_btn_estop.config(bg="#ef4444" if estop else c_off, fg="#ffffff" if estop else "#f87171")
+
+        if sw1 != self.ultimo_joy_sw1:
+            self.ultimo_joy_sw1 = sw1
+            nuevo_modo = "CRAB" if sw1 else "ACKERMANN"
+            self.modo_conduccion.set(nuevo_modo)
+            self.cambiar_modo_conduccion()
+
+        if s360 != self.ultimo_joy_360:
+            self.ultimo_joy_360 = s360
+            self.servos_360.set(bool(s360))
+            self.actualizar_rango_servos()
+
+        if estop and not self.ultimo_joy_estop:
+            self.ultimo_joy_estop = estop
+            self.parar_emergencia()
+            return
+        self.ultimo_joy_estop = estop
+
+        if sw2:
+            self.centrar_todos_los_servos()
+
+        if not any(self.teclas_presionadas.values()):
+            modo = self.modo_conduccion.get()
+            nuevo = " "
+
+            if piv_izq or s2_x < -35:
+                self.preset_point_turn()
+                nuevo = "PIVOT_IZQ"
+            elif piv_der or s2_x > 35:
+                self.preset_point_turn()
+                nuevo = "PIVOT_DER"
+            elif s1_y > 35:
+                nuevo = "W"
+                if modo in ["ACKERMANN", "CRAB"]:
+                    self.ang_s1.set(90); self.ang_s2.set(90); self.ang_s3.set(90); self.ang_s4.set(90)
+            elif s1_y < -35:
+                nuevo = "S"
+                if modo in ["ACKERMANN", "CRAB"]:
+                    self.ang_s1.set(90); self.ang_s2.set(90); self.ang_s3.set(90); self.ang_s4.set(90)
+            elif s1_x < -35:
+                nuevo = "A"
+                if modo == "ACKERMANN":
+                    if not self.invertir_servos.get():
+                        self.ang_s1.set(120); self.ang_s2.set(120); self.ang_s3.set(60); self.ang_s4.set(60)
+                    else:
+                        self.ang_s1.set(60); self.ang_s2.set(60); self.ang_s3.set(120); self.ang_s4.set(120)
+                elif modo == "CRAB":
+                    if self.servos_360.get():
+                        ang = 180 if not self.invertir_servos.get() else 0
+                        self.ang_s1.set(ang); self.ang_s2.set(ang); self.ang_s3.set(ang); self.ang_s4.set(ang)
+                    else:
+                        ang = 135 if not self.invertir_servos.get() else 45
+                        self.ang_s1.set(ang); self.ang_s2.set(ang); self.ang_s3.set(ang); self.ang_s4.set(ang)
+            elif s1_x > 35:
+                nuevo = "D"
+                if modo == "ACKERMANN":
+                    if not self.invertir_servos.get():
+                        self.ang_s1.set(60); self.ang_s2.set(60); self.ang_s3.set(120); self.ang_s4.set(120)
+                    else:
+                        self.ang_s1.set(120); self.ang_s2.set(120); self.ang_s3.set(60); self.ang_s4.set(60)
+                elif modo == "CRAB":
+                    if self.servos_360.get():
+                        ang = 0 if not self.invertir_servos.get() else 180
+                        self.ang_s1.set(ang); self.ang_s2.set(ang); self.ang_s3.set(ang); self.ang_s4.set(ang)
+                    else:
+                        ang = 45 if not self.invertir_servos.get() else 135
+                        self.ang_s1.set(ang); self.ang_s2.set(ang); self.ang_s3.set(ang); self.ang_s4.set(ang)
+
+            if nuevo != self.comando_actual:
+                self.comando_actual = nuevo
+                self.enviar_trama_actual()
+                self.actualizar_botones_ui(nuevo)
 
     def bucle_lectura_tx(self):
         while self.ejecutando:
