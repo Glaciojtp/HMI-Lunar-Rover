@@ -61,15 +61,16 @@ class HMIRoverRockerBogie:
         self.tasa_tx_hz = 0
         self.ultimo_tiempo_tasa = time.time()
 
-        # Variables de potencia PWM para los 6 motores (0 a 255)
-        self.pwm_m1 = tk.IntVar(value=150) # Delantero Izq
-        self.pwm_m2 = tk.IntVar(value=150) # Medio Izq (Fijo)
-        self.pwm_m3 = tk.IntVar(value=150) # Trasero Izq
-        self.pwm_m4 = tk.IntVar(value=150) # Delantero Der
-        self.pwm_m5 = tk.IntVar(value=150) # Medio Der (Fijo)
-        self.pwm_m6 = tk.IntVar(value=150) # Trasero Der
+        # Variables de Trim porcentual (Ratio 0% a 150%, 100% = 1.0x directo de Master)
+        self.trim_m1 = tk.IntVar(value=100) # Delantero Izq
+        self.trim_m2 = tk.IntVar(value=100) # Medio Izq (Fijo)
+        self.trim_m3 = tk.IntVar(value=100) # Trasero Izq
+        self.trim_m4 = tk.IntVar(value=100) # Delantero Der
+        self.trim_m5 = tk.IntVar(value=100) # Medio Der (Fijo)
+        self.trim_m6 = tk.IntVar(value=100) # Trasero Der
+        self.lbl_trims = {}
 
-        # Masters de Tracción por Lado
+        # Masters de Tracción por Lado (0 a 255)
         self.master_izq = tk.IntVar(value=150)
         self.master_der = tk.IntVar(value=150)
 
@@ -87,6 +88,8 @@ class HMIRoverRockerBogie:
 
         # Construir Interfaz Gráfica
         self.crear_widgets()
+        self.actualizar_labels_trim()
+        self.redibujar_rover_actual()
 
         # Enlazar eventos de Teclado
         self.root.bind("<KeyPress>", self.evento_key_press)
@@ -172,13 +175,16 @@ class HMIRoverRockerBogie:
         col_der.pack(side="right", fill="both", expand=True, padx=(6, 0))
 
         # -------------------------------------------------------------------------
-        # TARJETA 1: 6 SLIDERS DE MOTORES DE TRACCIÓN (0 - 255)
+        # TARJETA 1: TRIMS DE TRACCIÓN (RATIO % MULTIPLICADO POR MASTER)
         # -------------------------------------------------------------------------
         card_motores = ttk.Frame(col_izq, style="Card.TFrame", padding=10)
         card_motores.pack(fill="x", pady=(0, 8))
 
-        lbl_tit_mot = ttk.Label(card_motores, text="⚙️ TRACCIÓN INDEPENDIENTE (6 MOTORES)", style="Header.TLabel")
-        lbl_tit_mot.pack(anchor="w", pady=(0, 4))
+        frm_tit_mot = ttk.Frame(card_motores, style="Card.TFrame")
+        frm_tit_mot.pack(fill="x", pady=(0, 4))
+        ttk.Label(frm_tit_mot, text="⚙️ CALIBRACIÓN & TRIMS (RATIO % MULTIPLICADO POR MASTER)", style="Header.TLabel").pack(side="left")
+        tk.Button(frm_tit_mot, text="⟲ Reset Trims (100%)", bg="#334155", fg="#00f5d4",
+                  font=("Segoe UI", 8, "bold"), relief="flat", padx=6, pady=1, command=self.reset_trims).pack(side="right")
 
         grid_motores = ttk.Frame(card_motores, style="Card.TFrame")
         grid_motores.pack(fill="x")
@@ -187,9 +193,9 @@ class HMIRoverRockerBogie:
         col_m_izq = ttk.Frame(grid_motores, style="Card.TFrame")
         col_m_izq.pack(side="left", fill="both", expand=True, padx=(0, 5))
         ttk.Label(col_m_izq, text="LADO IZQUIERDO", style="SubHeader.TLabel").pack(anchor="w")
-        self.crear_slider(col_m_izq, "M1 (Delantero Izq)", self.pwm_m1, 0, 255)
-        self.crear_slider(col_m_izq, "M2 (Medio Izq - Fijo)", self.pwm_m2, 0, 255)
-        self.crear_slider(col_m_izq, "M3 (Trasero Izq)", self.pwm_m3, 0, 255)
+        self.crear_slider_trim(col_m_izq, 1, "M1 (Delantero Izq)", self.trim_m1)
+        self.crear_slider_trim(col_m_izq, 2, "M2 (Medio Izq - Fijo)", self.trim_m2)
+        self.crear_slider_trim(col_m_izq, 3, "M3 (Trasero Izq)", self.trim_m3)
 
         # Master Izquierdo
         frm_mi = ttk.Frame(col_m_izq, style="Card.TFrame")
@@ -202,9 +208,9 @@ class HMIRoverRockerBogie:
         col_m_der = ttk.Frame(grid_motores, style="Card.TFrame")
         col_m_der.pack(side="right", fill="both", expand=True, padx=(5, 0))
         ttk.Label(col_m_der, text="LADO DERECHO", style="SubHeader.TLabel").pack(anchor="w")
-        self.crear_slider(col_m_der, "M4 (Delantero Der)", self.pwm_m4, 0, 255)
-        self.crear_slider(col_m_der, "M5 (Medio Der - Fijo)", self.pwm_m5, 0, 255)
-        self.crear_slider(col_m_der, "M6 (Trasero Der)", self.pwm_m6, 0, 255)
+        self.crear_slider_trim(col_m_der, 4, "M4 (Delantero Der)", self.trim_m4)
+        self.crear_slider_trim(col_m_der, 5, "M5 (Medio Der - Fijo)", self.trim_m5)
+        self.crear_slider_trim(col_m_der, 6, "M6 (Trasero Der)", self.trim_m6)
 
         # Master Derecho
         frm_md = ttk.Frame(col_m_der, style="Card.TFrame")
@@ -404,6 +410,50 @@ class HMIRoverRockerBogie:
                      bg="#212433", fg="#00f5d4", highlightthickness=0, command=cmd_call)
         s.pack(fill="x")
 
+    def crear_slider_trim(self, parent, motor_idx, nombre, variable):
+        frm = ttk.Frame(parent, style="Card.TFrame")
+        frm.pack(fill="x", pady=2)
+
+        lbl = ttk.Label(frm, text=f"{nombre} [100% ➔ PWM: 150]", style="SubHeader.TLabel")
+        lbl.pack(anchor="w")
+        self.lbl_trims[motor_idx] = (lbl, nombre)
+
+        def al_mover(val):
+            self.actualizar_labels_trim()
+            if self.conectado and self.comando_actual != " ":
+                self.enviar_trama_actual()
+            self.redibujar_rover_actual()
+
+        s = tk.Scale(frm, from_=0, to=150, orient="horizontal", variable=variable,
+                     bg="#212433", fg="#00f5d4", highlightthickness=0, command=al_mover)
+        s.pack(fill="x")
+
+    def get_pwm_motor(self, motor_idx):
+        """Calcula el PWM (0-255) escalando el Master del lado por el ratio de Trim (0-150%)."""
+        if motor_idx in [1, 2, 3]:
+            master = self.master_izq.get()
+        else:
+            master = self.master_der.get()
+        trim = getattr(self, f"trim_m{motor_idx}").get()
+        return max(0, min(255, int(round(master * (trim / 100.0)))))
+
+    def actualizar_labels_trim(self):
+        for idx in range(1, 7):
+            if idx in self.lbl_trims:
+                lbl, nombre = self.lbl_trims[idx]
+                trim = getattr(self, f"trim_m{idx}").get()
+                pwm = self.get_pwm_motor(idx)
+                lbl.config(text=f"{nombre} [{trim}% ➔ PWM: {pwm}]")
+
+    def reset_trims(self):
+        for i in range(1, 7):
+            getattr(self, f"trim_m{i}").set(100)
+        self.actualizar_labels_trim()
+        if self.conectado and self.comando_actual != " ":
+            self.enviar_trama_actual()
+        self.redibujar_rover_actual()
+        self.log_consola("Trims de los 6 motores restablecidos al 100% (Ratio 1.0x).")
+
     # =========================================================================
     # PRESETS Y CALIBRACIONES
     # =========================================================================
@@ -448,30 +498,62 @@ class HMIRoverRockerBogie:
         self.log_consola("Geometría configurada para Modo Cangrejo (Desplazamiento Diagonal).")
 
     def sync_master_izq(self, val):
-        v = int(val)
-        self.pwm_m1.set(v)
-        self.pwm_m2.set(v)
-        self.pwm_m3.set(v)
+        self.actualizar_labels_trim()
         if self.conectado and self.comando_actual != " ":
             self.enviar_trama_actual()
+        self.redibujar_rover_actual()
 
     def sync_master_der(self, val):
-        v = int(val)
-        self.pwm_m4.set(v)
-        self.pwm_m5.set(v)
-        self.pwm_m6.set(v)
+        self.actualizar_labels_trim()
         if self.conectado and self.comando_actual != " ":
             self.enviar_trama_actual()
+        self.redibujar_rover_actual()
 
     def al_mover_slider_motor(self, val):
         if self.conectado and self.comando_actual != " ":
             self.enviar_trama_actual()
+        self.redibujar_rover_actual()
 
     def al_mover_servo(self, val):
-        self.dibujar_esquema_rover(self.comando_actual, self.ang_s1.get(), self.ang_s2.get(),
-                                   self.ang_s3.get(), self.ang_s4.get())
+        self.redibujar_rover_actual()
         if self.conectado:
             self.enviar_trama_actual()
+
+    def calcular_pwms_actuales(self):
+        cmd = self.comando_actual.strip().upper()
+        if not cmd or cmd == "STOP" or cmd == " ":
+            return [0, 0, 0, 0, 0, 0]
+
+        m1 = self.get_pwm_motor(1)
+        m2 = self.get_pwm_motor(2)
+        m3 = self.get_pwm_motor(3)
+        m4 = self.get_pwm_motor(4)
+        m5 = self.get_pwm_motor(5)
+        m6 = self.get_pwm_motor(6)
+
+        if cmd == "W":
+            return [m1, m2, m3, m4, m5, m6]
+        elif cmd == "S":
+            return [-m1, -m2, -m3, -m4, -m5, -m6]
+        elif cmd == "PIVOT_IZQ":
+            return [-m1, -m2, -m3, m4, m5, m6]
+        elif cmd == "PIVOT_DER":
+            return [m1, m2, m3, -m4, -m5, -m6]
+        elif cmd == "A":
+            return [int(m1 * 0.7), int(m2 * 0.7), int(m3 * 0.7), m4, m5, m6]
+        elif cmd == "D":
+            return [m1, m2, m3, int(m4 * 0.7), int(m5 * 0.7), int(m6 * 0.7)]
+        elif cmd == "CRAB":
+            return [m1, m2, m3, m4, m5, m6]
+        else:
+            return [0, 0, 0, 0, 0, 0]
+
+    def redibujar_rover_actual(self):
+        pwms = self.calcular_pwms_actuales()
+        self.dibujar_esquema_rover(self.comando_actual,
+                                   self.ang_s1.get(), self.ang_s2.get(),
+                                   self.ang_s3.get(), self.ang_s4.get(),
+                                   pwms)
 
     # =========================================================================
     # COMUNICACIÓN SERIAL & PROTOCOLO EXTENDIDO
@@ -536,9 +618,9 @@ class HMIRoverRockerBogie:
         if not self.conectado or not self.serial_conn or not self.serial_conn.is_open:
             return
 
-        # Calcular potencias efectivas
-        pot_izq = int((self.pwm_m1.get() + self.pwm_m2.get() + self.pwm_m3.get()) / 3)
-        pot_der = int((self.pwm_m4.get() + self.pwm_m5.get() + self.pwm_m6.get()) / 3)
+        # Calcular potencias efectivas aplicando trims
+        pot_izq = int((self.get_pwm_motor(1) + self.get_pwm_motor(2) + self.get_pwm_motor(3)) / 3)
+        pot_der = int((self.get_pwm_motor(4) + self.get_pwm_motor(5) + self.get_pwm_motor(6)) / 3)
 
         s1 = self.ang_s1.get()
         s2 = self.ang_s2.get()
@@ -678,7 +760,7 @@ class HMIRoverRockerBogie:
     # =========================================================================
     # DIBUJO CINEMÁTICO 2D: ROCKER-BOGIE 6 RUEDAS + 4 SERVOS ROTATORIOS
     # =========================================================================
-    def dibujar_rueda_rotada(self, cx, cy, angulo_grados, color, texto):
+    def dibujar_rueda_rotada(self, cx, cy, angulo_grados, color, texto, pwm=0):
         # Convierte el ángulo a radianes: 90° es recto, <90° (ej 60°) inclina a la derecha, >90° (ej 120°) inclina a la izquierda
         rad = math.radians(90 - angulo_grados)
         w_half, h_half = 7, 14 # Ancho y alto de la rueda
@@ -694,7 +776,28 @@ class HMIRoverRockerBogie:
         self.canvas_rover.create_polygon(puntos_rotados, fill=color, outline="#ffffff", width=1)
         self.canvas_rover.create_text(cx, cy, text=texto, fill="#ffffff", font=("Segoe UI", 6, "bold"))
 
-    def dibujar_esquema_rover(self, cmd, s1, s2, s3, s4):
+        # Flecha indicadora de dirección y sentido de tracción por rueda
+        if pwm != 0:
+            arrow_color = "#34d399" if pwm > 0 else "#f97316" # Verde avance, Naranja reversa
+            longitud = 10 + int((min(255, abs(pwm)) / 255.0) * 12)
+            signo = 1 if pwm > 0 else -1
+
+            ux = math.sin(rad)
+            uy = -math.cos(rad)
+
+            x_ini = cx + signo * (h_half * 0.4) * ux
+            y_ini = cy + signo * (h_half * 0.4) * uy
+            x_fin = cx + signo * (h_half + longitud) * ux
+            y_fin = cy + signo * (h_half + longitud) * uy
+
+            self.canvas_rover.create_line(x_ini, y_ini, x_fin, y_fin,
+                                          fill=arrow_color, width=2,
+                                          arrow=tk.LAST, arrowshape=(8, 10, 4))
+
+    def dibujar_esquema_rover(self, cmd, s1, s2, s3, s4, pwms=None):
+        if pwms is None:
+            pwms = self.calcular_pwms_actuales()
+
         c = self.canvas_rover
         c.delete("all")
 
@@ -720,19 +823,19 @@ class HMIRoverRockerBogie:
         pos_m3 = (cx - 52, cy + 50) # Trasero Izq
         pos_m6 = (cx + 52, cy + 50) # Trasero Der
 
-        # 1. Dibujar Ruedas Delanteras Rotadas (S1 y S2)
-        self.dibujar_rueda_rotada(pos_m1[0], pos_m1[1], s1, color_activa, "M1")
-        self.dibujar_rueda_rotada(pos_m4[0], pos_m4[1], s2, color_activa, "M4")
+        # 1. Dibujar Ruedas Delanteras Rotadas (S1 y S2) con flechas
+        self.dibujar_rueda_rotada(pos_m1[0], pos_m1[1], s1, color_activa, "M1", pwms[0])
+        self.dibujar_rueda_rotada(pos_m4[0], pos_m4[1], s2, color_activa, "M4", pwms[3])
 
-        # 2. Dibujar Ruedas Medias Fijas (90° siempre recto)
-        self.dibujar_rueda_rotada(pos_m2[0], pos_m2[1], 90, color_activa, "M2")
-        self.dibujar_rueda_rotada(pos_m5[0], pos_m5[1], 90, color_activa, "M5")
+        # 2. Dibujar Ruedas Medias Fijas (90° siempre recto) con flechas
+        self.dibujar_rueda_rotada(pos_m2[0], pos_m2[1], 90, color_activa, "M2", pwms[1])
+        self.dibujar_rueda_rotada(pos_m5[0], pos_m5[1], 90, color_activa, "M5", pwms[4])
 
-        # 3. Dibujar Ruedas Traseras Rotadas (S3 y S4)
-        self.dibujar_rueda_rotada(pos_m3[0], pos_m3[1], s3, color_activa, "M3")
-        self.dibujar_rueda_rotada(pos_m6[0], pos_m6[1], s4, color_activa, "M6")
+        # 3. Dibujar Ruedas Traseras Rotadas (S3 y S4) con flechas
+        self.dibujar_rueda_rotada(pos_m3[0], pos_m3[1], s3, color_activa, "M3", pwms[2])
+        self.dibujar_rueda_rotada(pos_m6[0], pos_m6[1], s4, color_activa, "M6", pwms[5])
 
-        # 4. Indicador de Vector de Movimiento
+        # 4. Indicador de Vector de Movimiento General Central
         if cmd == "W":
             c.create_line(cx, cy - 15, cx, cy - 50, fill="#00f5d4", width=3, arrow=tk.LAST, arrowshape=(10, 12, 5))
         elif cmd == "S":
