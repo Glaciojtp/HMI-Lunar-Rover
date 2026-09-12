@@ -80,8 +80,10 @@ class HMIRoverRockerBogie:
         self.ang_s3 = tk.IntVar(value=90) # Trasero Izq
         self.ang_s4 = tk.IntVar(value=90) # Trasero Der
 
-        # Inversión de sentido de servos (para adaptarse a montajes mecánicos invertidos)
+        # Inversión y rango de servos (estándar 10°-170° o extendido continuo 360°)
         self.invertir_servos = tk.BooleanVar(value=False)
+        self.servos_360 = tk.BooleanVar(value=False)
+        self.sliders_servos = {}
 
         # Configurar Estilos Visuales
         self.configurar_estilos()
@@ -153,7 +155,7 @@ class HMIRoverRockerBogie:
         lbl_modo.pack(side="left", padx=(10, 4))
 
         self.cb_modo = ttk.Combobox(top_frame, width=14, textvariable=self.modo_conduccion,
-                                    values=["ACKERMANN", "POINT_TURN", "CRAB", "MANUAL"], state="readonly")
+                                    values=["ACKERMANN", "CRAB", "MANUAL"], state="readonly")
         self.cb_modo.pack(side="left", padx=4)
         self.cb_modo.bind("<<ComboboxSelected>>", self.cambiar_modo_conduccion)
 
@@ -235,32 +237,36 @@ class HMIRoverRockerBogie:
         col_s_del = ttk.Frame(grid_servos, style="Card.TFrame")
         col_s_del.pack(side="left", fill="both", expand=True, padx=(0, 5))
         ttk.Label(col_s_del, text="TREN DELANTERO", style="SubHeader.TLabel").pack(anchor="w")
-        self.crear_slider(col_s_del, "S1: Delantero Izq (10°-170°)", self.ang_s1, 10, 170, callback=self.al_mover_servo)
-        self.crear_slider(col_s_del, "S2: Delantero Der (10°-170°)", self.ang_s2, 10, 170, callback=self.al_mover_servo)
+        self.crear_slider_servo(col_s_del, 1, "S1: Delantero Izq", self.ang_s1)
+        self.crear_slider_servo(col_s_del, 2, "S2: Delantero Der", self.ang_s2)
 
         # Servos Traseros
         col_s_tras = ttk.Frame(grid_servos, style="Card.TFrame")
         col_s_tras.pack(side="right", fill="both", expand=True, padx=(5, 0))
         ttk.Label(col_s_tras, text="TREN TRASERO", style="SubHeader.TLabel").pack(anchor="w")
-        self.crear_slider(col_s_tras, "S3: Trasero Izq (10°-170°)", self.ang_s3, 10, 170, callback=self.al_mover_servo)
-        self.crear_slider(col_s_tras, "S4: Trasero Der (10°-170°)", self.ang_s4, 10, 170, callback=self.al_mover_servo)
+        self.crear_slider_servo(col_s_tras, 3, "S3: Trasero Izq", self.ang_s3)
+        self.crear_slider_servo(col_s_tras, 4, "S4: Trasero Der", self.ang_s4)
 
         # Botones de Ajuste Rápido de Servos
         frm_btns_srv = ttk.Frame(card_servos, style="Card.TFrame")
         frm_btns_srv.pack(fill="x", pady=(6, 0))
 
         tk.Button(frm_btns_srv, text="⌖ Centrar Servos (90°)", bg="#334155", fg="#ffffff", font=("Segoe UI", 8, "bold"),
-                  command=self.centrar_todos_los_servos, relief="flat", padx=6).pack(side="left", padx=(0, 5))
+                  command=self.centrar_todos_los_servos, relief="flat", padx=6).pack(side="left", padx=(0, 4))
 
         tk.Button(frm_btns_srv, text="🔄 Config. Giro Sobre Eje", bg="#334155", fg="#00f5d4", font=("Segoe UI", 8, "bold"),
-                  command=self.preset_point_turn, relief="flat", padx=6).pack(side="left", padx=(0, 5))
+                  command=self.preset_point_turn, relief="flat", padx=6).pack(side="left", padx=(0, 4))
 
-        tk.Button(frm_btns_srv, text="🦀 Cangrejo (45°)", bg="#334155", fg="#ff9f1c", font=("Segoe UI", 8, "bold"),
-                  command=self.preset_cangrejo, relief="flat", padx=6).pack(side="left", padx=(0, 5))
+        tk.Button(frm_btns_srv, text="🦀 Cangrejo", bg="#334155", fg="#ff9f1c", font=("Segoe UI", 8, "bold"),
+                  command=self.preset_cangrejo, relief="flat", padx=6).pack(side="left", padx=(0, 4))
 
-        tk.Checkbutton(frm_btns_srv, text="Invertir Sentido Servos", variable=self.invertir_servos,
+        tk.Checkbutton(frm_btns_srv, text="Invertir Servos", variable=self.invertir_servos,
                        bg="#212433", fg="#e2e8f0", selectcolor="#161822", activebackground="#212433",
-                       font=("Segoe UI", 8), command=self.al_cambiar_inversion_servos).pack(side="right")
+                       font=("Segoe UI", 8), command=self.al_cambiar_inversion_servos).pack(side="right", padx=(4, 0))
+
+        tk.Checkbutton(frm_btns_srv, text="Servos 360°", variable=self.servos_360,
+                       bg="#212433", fg="#00f5d4", selectcolor="#161822", activebackground="#212433",
+                       font=("Segoe UI", 8, "bold"), command=self.actualizar_rango_servos).pack(side="right", padx=(4, 0))
 
         # -------------------------------------------------------------------------
         # TARJETA 3 (DERECHA ARRIBA): ESQUEMA 2D INTERACTIVO CON ROTACIÓN DE RUEDAS
@@ -428,6 +434,46 @@ class HMIRoverRockerBogie:
                      bg="#212433", fg="#00f5d4", highlightthickness=0, command=al_mover)
         s.pack(fill="x")
 
+    def crear_slider_servo(self, parent, servo_idx, nombre, variable):
+        frm = ttk.Frame(parent, style="Card.TFrame")
+        frm.pack(fill="x", pady=1)
+
+        rango_str = "0°-360°" if self.servos_360.get() else "10°-170°"
+        lbl = ttk.Label(frm, text=f"{nombre} ({rango_str})", style="SubHeader.TLabel")
+        lbl.pack(anchor="w")
+
+        desde = 0 if self.servos_360.get() else 10
+        hasta = 360 if self.servos_360.get() else 170
+        s = tk.Scale(frm, from_=desde, to=hasta, orient="horizontal", variable=variable,
+                     bg="#212433", fg="#00f5d4", highlightthickness=0, command=self.al_mover_servo)
+        s.pack(fill="x")
+        self.sliders_servos[servo_idx] = (lbl, s, nombre)
+
+    def actualizar_rango_servos(self):
+        es_360 = self.servos_360.get()
+        desde = 0 if es_360 else 10
+        hasta = 360 if es_360 else 170
+        rango_str = "0°-360°" if es_360 else "10°-170°"
+
+        for idx, (lbl, s, nombre) in self.sliders_servos.items():
+            s.config(from_=desde, to=hasta)
+            lbl.config(text=f"{nombre} ({rango_str})")
+            val = getattr(self, f"ang_s{idx}").get()
+            if not es_360:
+                val = max(10, min(170, val))
+                getattr(self, f"ang_s{idx}").set(val)
+
+        modo = self.modo_conduccion.get()
+        if modo == "CRAB":
+            self.preset_cangrejo()
+        elif self.comando_actual in ["PIVOT_IZQ", "PIVOT_DER"]:
+            self.preset_point_turn()
+        else:
+            self.redibujar_rover_actual()
+
+        estado_txt = "360° (Continuo/Extendido)" if es_360 else "Estándar (10°-170° Seguro)"
+        self.log_consola(f"Rango de Servos cambiado a: {estado_txt}")
+
     def get_pwm_motor(self, motor_idx):
         """Calcula el PWM (0-255) escalando el Master del lado por el ratio de Trim (0-150%)."""
         if motor_idx in [1, 2, 3]:
@@ -522,23 +568,29 @@ class HMIRoverRockerBogie:
             heading_deg = math.degrees(heading_rad)
             # Conversión a ángulo de servo: 90° es recto, <90° gira derecha, >90° gira izquierda
             servo_deg = int(round(90 - heading_deg))
-            servo_deg = max(10, min(170, servo_deg))
+            if self.servos_360.get():
+                servo_deg = servo_deg % 360
+            else:
+                servo_deg = max(10, min(170, servo_deg))
             angulos[rueda] = servo_deg
-            
+
         if self.invertir_servos.get():
             for k in angulos:
-                angulos[k] = 180 - angulos[k]
-                
+                if self.servos_360.get():
+                    angulos[k] = (360 - angulos[k]) % 360
+                else:
+                    angulos[k] = 180 - angulos[k]
+
         return angulos['S1'], angulos['S2'], angulos['S3'], angulos['S4']
 
     def al_cambiar_inversion_servos(self):
         modo = self.modo_conduccion.get()
-        if modo == "POINT_TURN" or self.comando_actual in ["PIVOT_IZQ", "PIVOT_DER"]:
-            self.preset_point_turn()
-        elif modo == "CRAB":
+        if modo == "CRAB":
             self.preset_cangrejo()
         elif modo == "ACKERMANN":
             self.evaluar_estado_movimiento()
+        elif self.comando_actual in ["PIVOT_IZQ", "PIVOT_DER"]:
+            self.preset_point_turn()
         else:
             self.redibujar_rover_actual()
 
@@ -555,15 +607,22 @@ class HMIRoverRockerBogie:
         self.log_consola(f"Geometría tangencial configurada para Giro 360°: S1={s1}°, S2={s2}°, S3={s3}°, S4={s4}°.")
 
     def preset_cangrejo(self):
-        # Desplazamiento diagonal a 45°
-        s1, s2, s3, s4 = self.calcular_cinematica_inversa(1.0, 1.0, 0.0)
+        # Modo Cangrejo:
+        # En servos 360°: traslación lateral pura a 180° (o 0° con inversión)
+        # En servos estándar: diagonal a 45°
+        if self.servos_360.get():
+            s1, s2, s3, s4 = (180, 180, 180, 180) if not self.invertir_servos.get() else (0, 0, 0, 0)
+        else:
+            s1, s2, s3, s4 = self.calcular_cinematica_inversa(1.0, 1.0, 0.0)
+
         self.ang_s1.set(s1)
         self.ang_s2.set(s2)
         self.ang_s3.set(s3)
         self.ang_s4.set(s4)
         self.enviar_trama_actual()
         self.dibujar_esquema_rover("CRAB", s1, s2, s3, s4)
-        self.log_consola(f"Geometría configurada para Modo Cangrejo: S1={s1}°, S2={s2}°, S3={s3}°, S4={s4}°.")
+        tipo = "Lateral Puro 90°" if self.servos_360.get() else "Diagonal 45°"
+        self.log_consola(f"Geometría configurada para Modo Cangrejo ({tipo}): S1={s1}°, S2={s2}°, S3={s3}°, S4={s4}°.")
 
     def sync_master_izq(self, val):
         self.actualizar_labels_trim()
@@ -608,8 +667,12 @@ class HMIRoverRockerBogie:
         elif cmd == "PIVOT_DER":
             return [m1, m2, m3, -m4, -m5, -m6]
         elif cmd == "A":
+            if self.modo_conduccion.get() == "CRAB":
+                return [m1, m2, m3, m4, m5, m6]
             return [int(m1 * 0.7), int(m2 * 0.7), int(m3 * 0.7), m4, m5, m6]
         elif cmd == "D":
+            if self.modo_conduccion.get() == "CRAB":
+                return [m1, m2, m3, m4, m5, m6]
             return [m1, m2, m3, int(m4 * 0.7), int(m5 * 0.7), int(m6 * 0.7)]
         elif cmd == "CRAB":
             return [m1, m2, m3, m4, m5, m6]
@@ -782,11 +845,11 @@ class HMIRoverRockerBogie:
             nuevo_cmd = "PIVOT_DER"
         elif self.teclas_presionadas['w']:
             nuevo_cmd = "W"
-            if modo == "ACKERMANN":
+            if modo in ["ACKERMANN", "CRAB"]:
                 self.ang_s1.set(90); self.ang_s2.set(90); self.ang_s3.set(90); self.ang_s4.set(90)
         elif self.teclas_presionadas['s']:
             nuevo_cmd = "S"
-            if modo == "ACKERMANN":
+            if modo in ["ACKERMANN", "CRAB"]:
                 self.ang_s1.set(90); self.ang_s2.set(90); self.ang_s3.set(90); self.ang_s4.set(90)
         elif self.teclas_presionadas['a']:
             nuevo_cmd = "A"
@@ -796,7 +859,12 @@ class HMIRoverRockerBogie:
                 else:
                     self.ang_s1.set(60); self.ang_s2.set(60); self.ang_s3.set(120); self.ang_s4.set(120)
             elif modo == "CRAB":
-                self.ang_s1.set(135); self.ang_s2.set(135); self.ang_s3.set(135); self.ang_s4.set(135)
+                if self.servos_360.get():
+                    ang = 180 if not self.invertir_servos.get() else 0
+                    self.ang_s1.set(ang); self.ang_s2.set(ang); self.ang_s3.set(ang); self.ang_s4.set(ang)
+                else:
+                    ang = 135 if not self.invertir_servos.get() else 45
+                    self.ang_s1.set(ang); self.ang_s2.set(ang); self.ang_s3.set(ang); self.ang_s4.set(ang)
         elif self.teclas_presionadas['d']:
             nuevo_cmd = "D"
             if modo == "ACKERMANN":
@@ -805,7 +873,12 @@ class HMIRoverRockerBogie:
                 else:
                     self.ang_s1.set(120); self.ang_s2.set(120); self.ang_s3.set(60); self.ang_s4.set(60)
             elif modo == "CRAB":
-                self.ang_s1.set(45); self.ang_s2.set(45); self.ang_s3.set(45); self.ang_s4.set(45)
+                if self.servos_360.get():
+                    ang = 0 if not self.invertir_servos.get() else 180
+                    self.ang_s1.set(ang); self.ang_s2.set(ang); self.ang_s3.set(ang); self.ang_s4.set(ang)
+                else:
+                    ang = 45 if not self.invertir_servos.get() else 135
+                    self.ang_s1.set(ang); self.ang_s2.set(ang); self.ang_s3.set(ang); self.ang_s4.set(ang)
 
         if nuevo_cmd != self.comando_actual:
             self.comando_actual = nuevo_cmd
@@ -904,16 +977,32 @@ class HMIRoverRockerBogie:
         self.dibujar_rueda_rotada(pos_m6[0], pos_m6[1], s4, color_activa, "M6", pwms[5])
 
         # 4. Indicador de Vector de Movimiento General Central
+        modo_act = self.modo_conduccion.get()
         if cmd == "W":
             c.create_line(cx, cy - 15, cx, cy - 50, fill="#00f5d4", width=3, arrow=tk.LAST, arrowshape=(10, 12, 5))
         elif cmd == "S":
             c.create_line(cx, cy + 15, cx, cy + 50, fill="#ff9f1c", width=3, arrow=tk.LAST, arrowshape=(10, 12, 5))
-        elif cmd in ["A", "PIVOT_IZQ"]:
+        elif cmd == "A":
+            if modo_act == "CRAB":
+                c.create_line(cx + 25, cy, cx - 45, cy, fill="#ff9f1c", width=3, arrow=tk.LAST, arrowshape=(10, 12, 5))
+            else:
+                c.create_arc(cx - 30, cy - 30, cx + 30, cy + 30, start=45, extent=180, style=tk.ARC, outline="#00f5d4", width=3)
+        elif cmd == "D":
+            if modo_act == "CRAB":
+                c.create_line(cx - 25, cy, cx + 45, cy, fill="#ff9f1c", width=3, arrow=tk.LAST, arrowshape=(10, 12, 5))
+            else:
+                c.create_arc(cx - 30, cy - 30, cx + 30, cy + 30, start=225, extent=180, style=tk.ARC, outline="#00f5d4", width=3)
+        elif cmd == "PIVOT_IZQ":
             c.create_arc(cx - 30, cy - 30, cx + 30, cy + 30, start=45, extent=180, style=tk.ARC,
                          outline="#00f5d4", width=3)
-        elif cmd in ["D", "PIVOT_DER", "PIVOT"]:
+        elif cmd in ["PIVOT_DER", "PIVOT"]:
             c.create_arc(cx - 30, cy - 30, cx + 30, cy + 30, start=225, extent=180, style=tk.ARC,
                          outline="#00f5d4", width=3)
+        elif cmd == "CRAB":
+            if self.servos_360.get():
+                c.create_line(cx + 25, cy, cx - 45, cy, fill="#ff9f1c", width=3, arrow=tk.LAST, arrowshape=(10, 12, 5))
+            else:
+                c.create_line(cx - 25, cy + 25, cx + 35, cy - 35, fill="#ff9f1c", width=3, arrow=tk.LAST, arrowshape=(10, 12, 5))
 
     def actualizar_telemetria_ui(self):
         t_ahora = time.time()
