@@ -282,7 +282,8 @@ class HMIRoverDebug:
         tk.Button(frm_s_btns, text="🦀 Cangrejo", bg="#334155", fg="#ff9f1c", font=("Segoe UI", 8, "bold"),
                   command=self.preset_cangrejo, relief="flat", padx=6).pack(side="left", padx=2)
         tk.Checkbutton(frm_s_btns, text="Invertir Servos", variable=self.invertir_servos,
-                       bg="#151824", fg="#e2e8f0", selectcolor="#0c0e17", font=("Segoe UI", 8)).pack(side="right")
+                       bg="#151824", fg="#e2e8f0", selectcolor="#0c0e17", font=("Segoe UI", 8),
+                       command=self.al_cambiar_inversion_servos).pack(side="right")
 
         # --- PANEL DERECHO: DOBLE ESQUEMA 2D (TX vs RX) ---
         card_dual_esquema = ttk.Frame(col_der, style="Card.TFrame", padding=8)
@@ -882,7 +883,7 @@ class HMIRoverDebug:
             c.create_line(cx, cy + 8, cx, cy + 28, fill="#ff9f1c", width=2, arrow=tk.LAST)
         elif cmd in ["A", "PIVOT_IZQ"]:
             c.create_arc(cx - 20, cy - 20, cx + 20, cy + 20, start=45, extent=180, style=tk.ARC, outline="#00f5d4", width=2)
-        elif cmd in ["D", "PIVOT_DER"]:
+        elif cmd in ["D", "PIVOT_DER", "PIVOT"]:
             c.create_arc(cx - 20, cy - 20, cx + 20, cy + 20, start=225, extent=180, style=tk.ARC, outline="#00f5d4", width=2)
 
         self.lbl_tx_valores.config(text=f"Izq:{tx['izq']} | Der:{tx['der']} | S:[{tx['s1']},{tx['s2']},{tx['s3']},{tx['s4']}]")
@@ -969,13 +970,86 @@ class HMIRoverDebug:
         self.ang_s1.set(90); self.ang_s2.set(90); self.ang_s3.set(90); self.ang_s4.set(90)
         self.enviar_trama_actual()
 
+    def calcular_cinematica_inversa(self, vx, vy, omega, L=1.0, W=1.0):
+        """
+        Calcula la cinemática inversa 2D para la plataforma Rocker-Bogie 6x6.
+        Determina los ángulos tangenciales exactos de los 4 servos (S1, S2, S3, S4)
+        para giro y traslación sin derrape ni arrastre lateral.
+        
+        Marco de referencia (Cuerpo del Rover):
+          +X: Hacia la derecha del vehículo
+          +Y: Hacia adelante (longitudinal)
+          +omega: Giro antihorario (CCW)
+          -omega: Giro horario (CW)
+          
+        Posición de las esquinas respecto al centro de rotación (0, 0):
+          S1 (Delantero Izq): (-W, +L)
+          S2 (Delantero Der): (+W, +L)
+          S3 (Trasero Izq):   (-W, -L)
+          S4 (Trasero Der):   (+W, -L)
+        """
+        esquinas = {
+            'S1': (-W,  L),
+            'S2': ( W,  L),
+            'S3': (-W, -L),
+            'S4': ( W, -L),
+        }
+        angulos = {}
+        for rueda, (xi, yi) in esquinas.items():
+            v_ix = vx - omega * yi
+            v_iy = vy + omega * xi
+            
+            if abs(v_ix) < 1e-4 and abs(v_iy) < 1e-4:
+                angulos[rueda] = 90
+                continue
+                
+            # Determinar si la rueda opera con tracción longitudinal positiva o reversa
+            # En giro sobre su eje horario (omega < 0), lado derecho retrocede (v_iy < 0)
+            # En giro sobre su eje antihorario (omega > 0), lado izquierdo retrocede (v_iy < 0)
+            trac_reversa = (v_iy < -1e-4) or (abs(v_iy) <= 1e-4 and ((omega < 0 and xi > 0) or (omega > 0 and xi < 0)))
+            
+            if trac_reversa:
+                heading_rad = math.atan2(-v_ix, -v_iy)
+            else:
+                heading_rad = math.atan2(v_ix, v_iy)
+                
+            heading_deg = math.degrees(heading_rad)
+            # Conversión a ángulo de servo: 90° es recto, <90° gira derecha, >90° gira izquierda
+            servo_deg = int(round(90 - heading_deg))
+            servo_deg = max(10, min(170, servo_deg))
+            angulos[rueda] = servo_deg
+            
+        if self.invertir_servos.get():
+            for k in angulos:
+                angulos[k] = 180 - angulos[k]
+                
+        return angulos['S1'], angulos['S2'], angulos['S3'], angulos['S4']
+
+    def al_cambiar_inversion_servos(self):
+        modo = self.modo_conduccion.get()
+        if modo == "POINT_TURN" or self.comando_actual in ["PIVOT_IZQ", "PIVOT_DER"]:
+            self.preset_point_turn()
+        elif modo == "CRAB":
+            self.preset_cangrejo()
+        elif modo == "ACKERMANN":
+            self.evaluar_movimiento()
+        else:
+            self.actualizar_grafico_tx()
+
     def preset_point_turn(self):
-        self.ang_s1.set(135); self.ang_s2.set(45); self.ang_s3.set(45); self.ang_s4.set(135)
+        # Cinemática inversa tangencial al círculo concéntrico centrado en el rover:
+        # S1 (Del. Izq) = 45°, S2 (Del. Der) = 135°, S3 (Tras. Izq) = 135°, S4 (Tras. Der) = 45°
+        s1, s2, s3, s4 = self.calcular_cinematica_inversa(0.0, 0.0, -1.0)
+        self.ang_s1.set(s1); self.ang_s2.set(s2); self.ang_s3.set(s3); self.ang_s4.set(s4)
         self.enviar_trama_actual()
+        self.log_consola("SYS", f"Geometría tangencial configurada para Giro 360°: S1={s1}°, S2={s2}°, S3={s3}°, S4={s4}°.")
 
     def preset_cangrejo(self):
-        self.ang_s1.set(135); self.ang_s2.set(135); self.ang_s3.set(135); self.ang_s4.set(135)
+        # Desplazamiento diagonal a 45°
+        s1, s2, s3, s4 = self.calcular_cinematica_inversa(1.0, 1.0, 0.0)
+        self.ang_s1.set(s1); self.ang_s2.set(s2); self.ang_s3.set(s3); self.ang_s4.set(s4)
         self.enviar_trama_actual()
+        self.log_consola("SYS", f"Geometría configurada para Modo Cangrejo: S1={s1}°, S2={s2}°, S3={s3}°, S4={s4}°.")
 
     def sync_master_izq(self, val):
         self.actualizar_labels_trim()

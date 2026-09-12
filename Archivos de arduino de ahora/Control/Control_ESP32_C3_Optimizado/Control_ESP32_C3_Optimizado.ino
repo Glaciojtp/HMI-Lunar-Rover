@@ -62,7 +62,7 @@ void procesarComando(char* cmdStr) {
 
   // Parseo de trama CSV
   // Formato HMI V2 extendido: "CMD,PotIzq,PotDer,S1,S2,S3,S4"
-  // Ejemplo: "W,150,150,90,90,90,90" o "PIVOT_IZQ,150,150,135,45,45,135"
+  // Ejemplo: "W,150,150,90,90,90,90" o "PIVOT_IZQ,150,150,45,135,135,45"
 
   int partes[7];
   int ultimoIdx = 0;
