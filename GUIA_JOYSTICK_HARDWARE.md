@@ -1,35 +1,34 @@
-# GUÍA TÉCNICA Y ESQUEMÁTICO: MANDO JOYSTICK FÍSICO (ARDUINO NANO)
+# GUÍA TÉCNICA Y ESQUEMÁTICO: MANDO JOYSTICK AUTÓNOMO CON NRF24L01
 
-> **SUBSISTEMA DE TELEOPERACIÓN MANUAL - ROVER LUNAR V2.0**  
-> Documentación técnica de diseño eléctrico, conexionado de pines, algoritmo de filtrado y protocolo de telemetría serie para el mando de control remoto físico con Arduino Nano / Arduino Nano ESP32.
+> **SUBSISTEMA DE TELEOPERACIÓN MANUAL AUTÓNOMO — ROVER LUNAR V2.0**  
+> Documentación de diseño de hardware, conexionado de pines, cinemática embebida y telemetría de depuración para el mando de control remoto físico con Arduino Nano / Arduino Nano ESP32 y radio NRF24L01+ integrada.
 
 ---
 
-## 1. Visión General del Subsistema
+## 1. Visión General y Filosofía de Diseño
 
-El subsistema de mando físico (**Remote Joystick Controller**) permite al operador maniobrar el **Rover Lunar V2.0** con sensibilidad analógica y respuesta inmediata, desacoplando la conducción del teclado de la PC.
+El mando físico (**Remote Standalone Joystick Controller**) es una estación de control manual **100% autónoma**:
+* **Operación de Campo (Sin PC):** El microcontrolador (Arduino Nano / Nano ESP32) adquiere las señales de los sticks y pulsadores, resuelve la cinemática de dirección en tiempo real y transmite directamente la trama binaria de radiocontrol mediante su módulo **NRF24L01+** hacia el Rover (Arduino MKR 1310).
+* **Operación de Depuración (Con PC opcional):** Al conectar el mando a una PC por cable USB, el mando envía simultáneamente telemetría de diagnóstico continua en formato serie (115200 baudios, ~28 Hz). La interfaz HMI en la computadora funciona como estación terrena pasiva para visualizar el gemelo digital 2D, monitorear los niveles analógicos y planificar calibraciones.
 
-El mando lee 5 canales analógicos continuos (2 sticks de dos ejes y 1 potenciómetro maestro de velocidad) y 6 entradas digitales (pulsadores de los sticks, parada de emergencia de golpe, selector de servos 360° y botones macro de giro sobre su eje).
-
-### Arquitectura de Integración con el Sistema:
+### Diagrama de Arquitectura del Sistema:
 ```mermaid
 graph LR
-    subgraph Mando Físico
+    subgraph Mando Físico Autónomo
         S1[Stick Izquierdo Tracción/Giro] --> NANO[Arduino Nano / Nano ESP32]
         S2[Stick Derecho Rotación Eje] --> NANO
         POT[Potenciómetro Master PWM] --> NANO
         ESTOP[Botón E-STOP Emergencia] --> NANO
         SW[Pulsadores Modos y 360°] --> NANO
+        NANO --> RF_TX[NRF24L01+ en Mando<br>SPI HW: D9, D10, D11, D12, D13]
     end
 
-    NANO -- "USB Serie (115200 bps, 50 Hz)\nTrama JOY:..." --> PC[PC / HMI Rover]
-    
-    subgraph Estación Terrena HMI
-        PC -- "Monitoreo 2D en Vivo\n(Gauges + Crosshairs)" --> GUI[HMI Debug / V2]
-        PC -- "Trama RF 6 Bytes (Paquete)" --> ESP32[Transmisor ESP32-C3]
-    end
+    RF_TX == "Enlace RF Directo 2.4 GHz<br>(Canal 108 @ 250 kbps, 8 Bytes)" ==> MKR[Rover MKR 1310<br>Receptor a Bordo]
 
-    ESP32 -- "RF 2.4 GHz (NRF24L01+ Ch 108)" --> MKR[Rover MKR 1310]
+    subgraph Estación Terrena Opcional
+        NANO -. "USB Serial (115200 bps)<br>Solo Telemetría Debug y Alimentación" .-> PC[PC / HMI Rover V2 & Debug]
+        PC -. "Visualización Gemelo 2D<br>Crosshairs y Monitoreo" .-> GUI[Pantalla HMI]
+    end
 ```
 
 ---
@@ -38,149 +37,145 @@ graph LR
 
 | Componente | Cantidad | Especificaciones / Modelo | Función en el Mando |
 |---|---|---|---|
-| **Microcontrolador** | 1 | Arduino Nano V3.0 (ATmega328P) o Arduino Nano ESP32 | Lectura ADC, filtrado digital y transmisión serial |
-| **Thumbsticks Analógicos** | 2 | Módulo 2 Ejes tipo KY-023 / PS2 (potenciómetros 10 kΩ + SW) | Control de avance/reversa, dirección y giro sobre eje |
-| **Potenciómetro Maestro** | 1 | Potenciómetro rotativo lineal 10 kΩ (B10K) | Ajuste dinámico del techo de potencia PWM (0 a 255) |
-| **Pulsador de Emergencia** | 1 | Botón pulsador rojo tipo hongo o momentáneo NA | Parada de emergencia instantánea (E-STOP) |
+| **Microcontrolador** | 1 | Arduino Nano V3.0 (ATmega328P) o Arduino Nano ESP32 | Procesamiento cinemático, adquisición ADC y control de radio |
+| **Módulo de Radio RF**| 1 | NRF24L01+ con antena integrada o con conector SMA (PA+LNA)| Transmisión inalámbrica de ultra baja latencia a 2.4 GHz |
+| **Capacitor de Radio** | 1 | Electrolítico 10 µF a 100 µF (16V o superior) | **OBLIGATORIO** soldado directo entre VCC (3.3V) y GND del NRF24 |
+| **Thumbsticks Analógicos** | 2 | Módulo 2 Ejes tipo KY-023 / PS2 (potenciómetros 10 kΩ + SW) | Control de avance/reversa, giro Ackermann, strafe y pivot turn |
+| **Potenciómetro Maestro** | 1 | Potenciómetro rotativo lineal 10 kΩ (B10K) | Ajuste directo del techo de potencia PWM (0 a 255) |
+| **Pulsador de Emergencia** | 1 | Botón pulsador rojo tipo hongo o momentáneo NA | Parada de emergencia física instantánea (E-STOP) |
 | **Pulsador / Switch 360°** | 1 | Pulsador momentáneo o palanca biestable SPST | Conmutador entre Servos Estándar [10°-170°] y 360° |
 | **Pulsadores de Macros** | 2 | Pulsadores táctiles momentáneos (6x6 mm o 12x12 mm) | Disparo rápido de giro sobre su eje (Izq Q / Der E) |
-| **Capacitor de Desacoplo**| 1 | Cerámico multicapa 100 nF (0.1 µF) | Filtrado de ruido de alta frecuencia en la línea 5V/3.3V |
-| **Resistencia LED (Opcional)**| 1 | 220 Ω a 330 Ω (1/4 W) | Limitación de corriente para LED externo de estado |
+| **LED de Estado** | 1 | LED verde o cian de 3 mm o 5 mm + resistencia 330 Ω | Indicador de latido y paquete transmitido con éxito |
 
 ---
 
-## 3. Pinout y Tabla de Conexiones Exactas
+## 3. Pinout y Conexionado Eléctrico Completo
 
-### 3.1. Entradas Analógicas
+> [!CAUTION]
+> **REGLA CRÍTICA DE ALIMENTACIÓN DEL NRF24L01:**  
+> El módulo NRF24L01 **debe alimentarse estrictamente con la salida de 3.3V** del Arduino Nano. Conectarlo a 5V quema la radio en el acto.  
+> Es imprescindible colocar el **capacitor electrolítico (10 a 100 µF)** directamente entre sus pines VCC y GND.
 
-| Componente | Pin del Módulo | Pin Arduino Nano | Señal / Función | Rango / Interpretación |
+### 3.1. Conexión del Módulo de Radiofrecuencia NRF24L01+
+| Pin NRF24L01 | Pin Arduino Nano | Función / Detalle |
+|---|---|---|
+| **VCC** | **3.3V** | Alimentación regulada 3.3V (con capacitor 10-100µF a GND) |
+| **GND** | **GND** | Tierra común |
+| **CE** | **Pin Digital 9** | Control de habilitación de radio (Chip Enable) |
+| **CSN** | **Pin Digital 10** | Chip Select SPI |
+| **MOSI** | **Pin Digital 11** | Bus SPI Hardware (Master Out Slave In) |
+| **MISO** | **Pin Digital 12** | Bus SPI Hardware (Master In Slave Out) |
+| **SCK** | **Pin Digital 13** | Bus SPI Hardware (Serial Clock) |
+
+---
+
+### 3.2. Entradas Analógicas (Sticks y Potenciómetro)
+Todos los potenciómetros se alimentan con **5V** (o **3.3V** en Nano ESP32) y **GND**.
+
+| Componente | Pin del Módulo | Pin Arduino Nano | Función Cinemática |
+|---|---|---|---|
+| **Stick 1 (Izquierdo)** | VRX | **A0** | Eje X: Giro lateral proporcional o Strafe Cangrejo |
+| **Stick 1 (Izquierdo)** | VRY | **A1** | Eje Y: Avance y Retroceso longitudinal |
+| **Stick 2 (Derecho)** | VRX | **A2** | Eje X: Rotación sobre su propio eje (Point Turn) |
+| **Stick 2 (Derecho)** | VRY | **A3** | Eje Y: Control auxiliar (Cámara / Pitch) |
+| **Potenciómetro Maestro**| Central | **A4** | Potencia Master global (0 a 255 PWM) |
+
+---
+
+### 3.3. Entradas Digitales (Configuradas con `INPUT_PULLUP`)
+El microcontrolador activa las resistencias pull-up internas. Cada pulsador se conecta entre el pin indicado y **GND**:
+
+| Componente | Pin Arduino Nano | Estado Normal | Al Presionar | Acción |
 |---|---|---|---|---|
-| **Stick 1 (Izquierdo)** | VRX | **A0** | Eje X: Giro lateral (o Strafe lateral en Modo Cangrejo) | -100% (Izq) a +100% (Der) |
-| **Stick 1 (Izquierdo)** | VRY | **A1** | Eje Y: Avance y Retroceso longitudinal | +100% (Avance) a -100% (Reversa) |
-| **Stick 2 (Derecho)** | VRX | **A2** | Eje X: Rotación sobre su propio eje (Point Turn) | -100% (CCW) a +100% (CW) |
-| **Stick 2 (Derecho)** | VRY | **A3** | Eje Y: Control fino de paso o eje auxiliar (Cámara) | Reservado / Expansión |
-| **Potenciómetro Master**| Terminal Central | **A4** | Divisor de tensión para potencia maestro | 0 a 255 PWM (Escalador global de Trims) |
-
-> [!NOTE]
-> Los extremos de los potenciómetros de los sticks y del potenciómetro maestro se conectan a **5V** (o **3.3V** en Nano ESP32) y **GND**.
-
----
-
-### 3.2. Entradas Digitales (Configuradas con `INPUT_PULLUP`)
-
-Todas las entradas digitales aprovechan las resistencias de pull-up internas del microcontrolador (~20-50 kΩ). No se requieren resistencias externas adicionales: el otro terminal del pulsador se conecta directamente a **GND**.
-
-| Componente | Pin Arduino Nano | Estado Normal (Reposo) | Estado Presionado | Acción del Sistema |
-|---|---|---|---|---|
-| **SW Stick 1 (Pulsador Izq)** | **Pin Digital 2** | `HIGH` (5V) | `LOW` (GND) | Alterna Modo de Conducción (Ackermann ⟷ Cangrejo) |
-| **SW Stick 2 (Pulsador Der)** | **Pin Digital 3** | `HIGH` (5V) | `LOW` (GND) | Recentrado instantáneo de servos a 90° |
-| **Pulsador E-STOP** | **Pin Digital 4** | `HIGH` (5V) | `LOW` (GND) | Parada de Emergencia global (Corta PWM y detiene rover) |
-| **Switch / Pulsador 360°** | **Pin Digital 5** | `HIGH` (5V) | `LOW` (GND) | Conmuta rango cinemático: Estándar (10°-170°) ⟷ 360° |
-| **Pulsador Macro Izq (Q)** | **Pin Digital 6** | `HIGH` (5V) | `LOW` (GND) | Dispara configuración tangencial y rotación horaria ↺ |
-| **Pulsador Macro Der (E)** | **Pin Digital 7** | `HIGH` (5V) | `LOW` (GND) | Dispara configuración tangencial y rotación antihoraria ↻ |
-| **LED de Estado / Latido** | **Pin Digital 13** | Salida | Destello (500 ms) | Heartbeat: Indica firmware operativo y enviando tramas |
+| **SW Stick 1 (Pulsador Izq)** | **Pin Digital 2** | `HIGH` (VCC) | `LOW` (GND) | Alterna Modo: Ackermann ⟷ Cangrejo |
+| **SW Stick 2 (Pulsador Der)** | **Pin Digital 3** | `HIGH` (VCC) | `LOW` (GND) | Recentrado inmediato de servos a 90° |
+| **Pulsador E-STOP** | **Pin Digital 4** | `HIGH` (VCC) | `LOW` (GND) | Parada de emergencia (corta tracción a 0) |
+| **Switch / Pulsador 360°** | **Pin Digital 5** | `HIGH` (VCC) | `LOW` (GND) | Alterna rango: Estándar (10°-170°) ⟷ 360° |
+| **Pulsador Macro Izq (↺)** | **Pin Digital 6** | `HIGH` (VCC) | `LOW` (GND) | Dispara rotación sobre eje antihoraria |
+| **Pulsador Macro Der (↻)** | **Pin Digital 7** | `HIGH` (VCC) | `LOW` (GND) | Dispara rotación sobre eje horaria |
+| **LED de Estado** | **Pin Digital 8** | Salida | Destello | Parpadea con cada transmisión RF exitosa |
 
 ---
 
-## 4. Esquemático Eléctrico del Mando
+## 4. Esquemático de Conexión del Mando
 
 ```text
-       +-------------------------------------------------------------+
-       |                     ARDUINO NANO / NANO ESP32               |
-       |                                                             |
-       |   [5V / 3.3V] o-----+------------+------------+             |
-       |                     |            |            |             |
-       |                     | VCC        | VCC        | Terminal 1  |
-       |                 +---+----+   +---+----+   +---+----+        |
-       |                 | STICK 1|   | STICK 2|   | POT 10K|        |
-       |                 |  (IZQ) |   |  (DER) |   | MASTER |        |
-       |                 +---+----+   +---+----+   +---+----+        |
-       |                     | VRX        | VRX        | Central     |
-       |       A0 <----------+            |            |             |
-       |       A1 <----------+ VRY        |            |             |
-       |       A2 <-----------------------+            |             |
-       |       A3 <-----------------------+ VRY        |             |
-       |       A4 <------------------------------------+             |
-       |                     | GND        | GND        | Terminal 2  |
-       |   [GND]       o-----+------------+------------+             |
-       |                     |            |            |             |
-       |                     | SW         | SW         |             |
-       |       D2 <----------+            |            |             |
-       |       D3 <-----------------------+            |             |
-       |                                                             |
-       |       D4 <---[ Pulsador E-STOP Rojo ]--------> GND          |
-       |       D5 <---[ Switch / Botón 360° ]---------> GND          |
-       |       D6 <---[ Pulsador Macro Q (↺) ]--------> GND          |
-       |       D7 <---[ Pulsador Macro E (↻) ]--------> GND          |
-       |                                                             |
-       |       D13 --->[ Resistor 330Ω ]--->[ LED Verde ]---> GND     |
-       +-------------------------------------------------------------+
+                               +---------------------------------------+
+                               |        ARDUINO NANO / NANO ESP32      |
+                               +---------------------------------------+
+                               |                                       |
+  [ +3.3V ] o------------------| 3.3V           (Capacitor 10-100µF)   |
+  [ GND   ] o------------------| GND             +--||--+              |
+                               |                 |      |              |
+                               |             +---+------+---+          |
+                               |             |   NRF24L01+  |          |
+                               | D9  ------->| CE           |          |
+                               | D10 ------->| CSN          |          |
+                               | D11 ------->| MOSI         |          |
+                               | D12 <-------| MISO         |          |
+                               | D13 ------->| SCK          |          |
+                               |             +--------------+          |
+                               |                                       |
+  [ +5V / +3.3V ] o------------| 5V / VCC                              |
+                               |   |---> VCC Stick 1, Stick 2, Pot 10K |
+                               |                                       |
+                               | A0 <--- VRX Stick 1 (Izquierdo)       |
+                               | A1 <--- VRY Stick 1 (Izquierdo)       |
+                               | A2 <--- VRX Stick 2 (Derecho)         |
+                               | A3 <--- VRY Stick 2 (Derecho)         |
+                               | A4 <--- Cursor Potenciómetro Maestro  |
+                               |                                       |
+  [ GND   ] o------------------| GND                                   |
+                               |   |---> GND Stick 1, Stick 2, Pot 10K |
+                               |   |---> Terminal común pulsadores     |
+                               |                                       |
+                               | D2 <--- SW Stick 1 (Pulsador Modo)    |
+                               | D3 <--- SW Stick 2 (Pulsador 90°)     |
+                               | D4 <--- Botón E-STOP Rojo             |
+                               | D5 <--- Switch Modo Servos 360°       |
+                               | D6 <--- Pulsador Macro Eje Izq (↺)    |
+                               | D7 <--- Pulsador Macro Eje Der (↻)    |
+                               |                                       |
+                               | D8 --->[ Resistor 330Ω ]--->[LED]--->GND
+                               +---------------------------------------+
 ```
 
 ---
 
-## 5. Medidas de Robustez de Software Implementadas
+## 5. Protocolo de Comunicación RF y Trama Serie de Depuración
 
-### 5.1. Filtro Pasa-Bajos EMA (Exponential Moving Average)
-Los potenciómetros mecánicos de carbón y las pistas de los thumbsticks sufren de ruido electromagnético y fluctuaciones de conversión ADC. Se implementa un filtro recursivo no bloqueante:
-$$y_k = y_{k-1} + \alpha \cdot (x_k - y_{k-1})$$
-Con $\alpha = 0.35$, eliminando el parpadeo de bits menos significativos del ADC sin introducir latencia perceptible para el piloto.
+### 5.1. Trama Inalámbrica Directa al Rover (8 Bytes Binarios)
+El mando envía cada **$35\text{ ms}$** (~28 Hz) la estructura binaria unificada que el receptor MKR 1310 ya reconoce:
 
-### 5.2. Zona Muerta Central (Deadband / Deadzone)
-Por tolerancias mecánicas de los resortes internos de retorno a neutro, la posición de reposo oscila en una pequeña ventana alrededor del valor central ($\approx 512$ en ADC de 10 bits o $\approx 2048$ en ADC de 12 bits).  
-* **Regla:** Cualquier lectura analógica dentro de $[Centro - 40, Centro + 40]$ es forzada rígidamente a $0\%$.
-* **Efecto:** El rover permanece estrictamente estático en reposo, erradicando el fenómeno de deriva continua (*creep*).
+```cpp
+struct __attribute__((packed)) PaqueteControl {
+  int16_t traccion_izq;  // -255 a 255 (Lado Izquierdo)
+  int16_t traccion_der;  // -255 a 255 (Lado Derecho)
+  uint8_t angulo_s1;     // S1: Delantero Izquierdo
+  uint8_t angulo_s2;     // S2: Delantero Derecho
+  uint8_t angulo_s3;     // S3: Trasero Izquierdo
+  uint8_t angulo_s4;     // S4: Trasero Derecho
+};
+```
+* **Canal:** `108` (2.508 GHz).
+* **Data Rate:** `RF24_250KBPS`.
+* **Potencia:** `RF24_PA_MAX`.
+* **AutoAck:** Desactivado (`false`) para streaming continuo en tiempo real.
 
-### 5.3. Antirrebote por Software (Debouncing)
-Todos los pulsadores digitales ejecutan una comprobación basada en `millis()` con ventana de rechazo de $300\text{ ms}$, eliminando falsos disparos por rebotes mecánicos de contactos.
-
----
-
-## 6. Protocolo de Telemetría Serie (Mando ➔ HMI)
-
-El firmware transmite periódicamente a **50 Hz** ($20\text{ ms}$) una trama de texto delimitada por comas a una tasa de **115200 baudios**:
+### 5.2. Telemetría de Depuración Serie (Mando ➔ PC / HMI)
+Si se conecta por USB a la PC, el mando transmite por Serial a **115200 baudios**:
 
 ```text
-JOY:<s1_x>,<s1_y>,<s2_x>,<s2_y>,<master_pwm>,<sw1>,<sw2>,<estop>,<s360>,<piv_izq>,<piv_der>\n
+JOY:s1_x,s1_y,s2_x,s2_y,master_pwm,sw1,sw2,estop,s360,piv_izq,piv_der,tx_ok\n
 ```
-
-### Descripción de los Campos:
-1. `s1_x`: Eje X del Stick 1 ($-100$ Izquierda a $+100$ Derecha).
-2. `s1_y`: Eje Y del Stick 1 ($+100$ Avance a $-100$ Reversa).
-3. `s2_x`: Eje X del Stick 2 ($-100$ Giro Eje Antihorario a $+100$ Giro Eje Horario).
-4. `s2_y`: Eje Y del Stick 2 ($-100$ a $+100$ auxiliar).
-5. `master_pwm`: Nivel de potencia maestro leído del potenciómetro ($0$ a $255$).
-6. `sw1`: Estado del modo de conducción ($0$: Ackermann, $1$: Cangrejo).
-7. `sw2`: Pulsador de centrado de servos ($1$: Activo / Solicitado).
-8. `estop`: Estado de parada de emergencia ($0$: Normal, $1$: PARADA ACTIVA).
-9. `s360`: Selector de rango de servos ($0$: Estándar [10°-170°], $1$: Servos 360°).
-10. `piv_izq`: Macro giro rápido sobre eje izquierda ($1$: Activo).
-11. `piv_der`: Macro giro rápido sobre eje derecha ($1$: Activo).
+Esto permite a la HMI en pantalla reproducir los crosshairs de los sticks, leer el nivel de batería/potenciómetro y verificar la tasa de transmisión sin interferir con la conducción del Rover.
 
 ---
 
-## 7. Instrucciones de Carga y Calibración
+## 6. Opciones de Alimentación para Uso en Terreno
 
-1. **Abrir el Sketch:** Cargar el archivo [`Joystick_Arduino_Nano.ino`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/Archivos%20de%20arduino%20de%20ahora/Control/Joystick_Arduino_Nano/Joystick_Arduino_Nano.ino) en el Arduino IDE.
-2. **Seleccionar Placa y Puerto:**
-   * Si se usa Nano clásico: Placa *"Arduino Nano"*, Procesador *"ATmega328P"* (o *"Old Bootloader"* según el clon).
-   * Si se usa Nano ESP32: Placa *"Arduino Nano ESP32"*.
-3. **Compilar y Subir.**
-4. **Verificación en Monitor Serie:** Abrir el monitor a **115200 baudios**. Se observará la salida continua:
-   ```text
-   JOY:0,0,0,0,150,0,0,0,0,0,0
-   ```
-   Al mover el stick izquierdo hacia adelante, el segundo campo aumentará progresivamente hasta `+100`. Al soltarlo volverá limpiamente a `0`.
-
----
-
-## 8. Vinculación con la HMI de Control (PC)
-
-1. En la interfaz gráfica (**HMI Rover V2** o **HMI Rover Debug**), ubicar la sección **🎮 JOYSTICK FÍSICO (NANO)**.
-2. Seleccionar el puerto COM asignado al Arduino Nano.
-3. Presionar **Conectar Joystick**.
-4. La interfaz mostrará en tiempo real:
-   * Las miras cruzadas (crosshairs 2D) con la posición exacta de cada stick.
-   * La barra de nivel del potenciómetro maestro sincronizada con los Master Sliders del Rover.
-   * Las insignias luminosas de pulsadores y parada de emergencia.
-5. El operador puede maniobrar el Rover físicamente mediante los sticks mientras el gemelo digital 2D reproduce la cinemática del Rocker-Bogie en tiempo real.
+1. **Power Bank USB:** Conectado directamente al conector USB del Arduino Nano. Proporciona 5V regulados y limpios para horas de autonomía.
+2. **Batería de 9V (o 2 celdas 18650 en serie ~7.4V - 8.4V):**
+   * Polo Positivo (+) al pin **`VIN`** del Arduino Nano.
+   * Polo Negativo (-) al pin **`GND`**.
+   * El regulador interno del Nano reduce el voltaje a 5V y 3.3V para la electrónica.
