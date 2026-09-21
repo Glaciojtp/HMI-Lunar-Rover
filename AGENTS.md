@@ -138,7 +138,7 @@ hmi_rover_cepit/
 ├── Lanzar_HMI_Debug.bat                     # Lanzador Windows de la interfaz Python modo DEBUG
 ├── WindowsFormsApp4/                        # Interfaz gráfica de telemetría en C# (.NET)
 ├── WindowsFormsApp4.slnx                    # Archivo de solución de Visual Studio
-├── Archivos de arduino de ahora/
+├── Firmware_y_Control/                      # Firmware de microcontroladores y software HMI
 │   ├── Contexto actual.docx                 # Documento técnico original del equipo
 │   ├── Codigo_MKR_28-8/                     # Código de referencia preliminar para MKR
 │   ├── Control/                             # Códigos para el módulo Transmisor (ESP32-C3)

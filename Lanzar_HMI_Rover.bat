@@ -1,6 +1,6 @@
 @echo off
 title HMI Rover Lunar V2.0
-cd /d "%~dp0Archivos de arduino de ahora\Interfaz"
+cd /d "%~dp0Firmware_y_Control\Interfaz"
 python HMI_Rover_V2.py
 if errorlevel 1 (
     echo.
