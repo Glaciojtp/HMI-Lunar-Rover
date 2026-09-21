@@ -52,3 +52,12 @@ $RECYCLE.BIN/
 *.bin
 *.o
 *.d
+
+# Logs & Diagnostics
+*.log
+logs/
+
+# Editor & IDE settings
+.vscode/
+.idea/
+
