@@ -91,6 +91,32 @@ Montado en el chasis del rover, recibe las tramas RF y controla actuadores y mot
 
 ---
 
+### 4.3. Receptor Migrado: Arduino Nano ESP32 (Arquitectura Rocker-Bogie 6x6 + 4WS)
+Alternativa oficial al MKR 1310. Trabaja a **3.3V nativo** (ESP32-S3) con PWM por hardware en todos sus pines y deja libres pines analógicos y el bus I2C para telemetría:
+
+| Componente Físico | Pin del Módulo | Pin Arduino Nano ESP32 | Función / Observación |
+|---|---|---|---|
+| **NRF24L01** | VCC | **3.3V** | Alimentación lógica regulada (¡Nunca 5V!). Con capacitor 10–100µF |
+| **NRF24L01** | GND | **GND** | Tierra común |
+| **NRF24L01** | CE | **Pin D9** | Chip Enable (GPIO 18) |
+| **NRF24L01** | CSN | **Pin D10** | Chip Select SPI (GPIO 21) |
+| **NRF24L01** | MOSI | **Pin D11** | Bus SPI Hardware (GPIO 38) |
+| **NRF24L01** | MISO | **Pin D12** | Bus SPI Hardware (GPIO 47) |
+| **NRF24L01** | SCK | **Pin D13** | Bus SPI Hardware (GPIO 48) |
+| **Puente H L9110S** | A1A | **Pin D2** | Tracción Izquierda - Sentido de Avance (PWM) |
+| **Puente H L9110S** | A1B | **Pin D5** | Tracción Izquierda - Sentido de Reversa (PWM) |
+| **Puente H L9110S** | B1A | **Pin D3** | Tracción Derecha - Sentido de Avance (PWM) |
+| **Puente H L9110S** | B1B | **Pin D4** | Tracción Derecha - Sentido de Reversa (PWM) |
+| **Servomotor S1** | Señal | **Pin D6** | Dirección Rueda Delantera Izquierda |
+| **Servomotor S2** | Señal | **Pin D7** | Dirección Rueda Delantera Derecha |
+| **Servomotor S3** | Señal | **Pin D8** | Dirección Rueda Trasera Izquierda |
+| **Servomotor S4** | Señal | **Pin A0** | Dirección Rueda Trasera Derecha |
+| **Regulador Step-Down**| Salida 5V-6V | VCC Servos | Alimentación aislada para S1, S2, S3 y S4 (GND común) |
+
+*Consulte [ESQUEMATICO_NANO_ESP32.md](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/ESQUEMATICO_NANO_ESP32.md) para el pinout completo y los pines libres de expansión.*
+
+---
+
 ## 5. Protocolo de Comunicación y Robustez de Software
 
 ### 5.1. Estructura Binaria de Datos Unificada (Trama de 6 Bytes)
@@ -134,22 +160,26 @@ struct __attribute__((packed)) Paquete {
 hmi_rover_cepit/
 ├── AGENTS.md                                # Este documento de referencia y contexto
 ├── ESQUEMATICO_MKR1310.md                   # Esquemático completo de conexiones y pinout del MKR
+├── ESQUEMATICO_NANO_ESP32.md                # Esquemático completo de conexiones y pinout del Nano ESP32
 ├── Lanzar_HMI_Rover.bat                     # Lanzador Windows de la interfaz Python normal
 ├── Lanzar_HMI_Debug.bat                     # Lanzador Windows de la interfaz Python modo DEBUG
+├── Subir_Cambios.bat                        # Sincronizador de 1 clic con GitHub
 ├── WindowsFormsApp4/                        # Interfaz gráfica de telemetría en C# (.NET)
 ├── WindowsFormsApp4.slnx                    # Archivo de solución de Visual Studio
 ├── Firmware_y_Control/                      # Firmware de microcontroladores y software HMI
 │   ├── Contexto actual.docx                 # Documento técnico original del equipo
 │   ├── Codigo_MKR_28-8/                     # Código de referencia preliminar para MKR
-│   ├── Control/                             # Códigos para el módulo Transmisor (ESP32-C3)
+│   ├── Control/                             # Códigos para el módulo Transmisor (ESP32-C3 y Arduino Nano)
 │   │   ├── Control_ESP32_C3_Debug/          # Versión DEBUG con telemetría RF y volcado HEX
 │   │   ├── Control_ESP32_C3_Optimizado/     # Versión optimizada de transmisión
 │   │   ├── Control_LOLIN-C3-MINI/           # Versión base LOLIN C3 Mini
 │   │   ├── Control_LOLIN-C3-MINI-v0.2/
-│   │   └── Control_LOLIN_C3_MINI-v0.1/
-│   ├── Ejecutor/                            # Códigos para el módulo Receptor (Arduino MKR 1310)
+│   │   ├── Control_LOLIN_C3_MINI-v0.1/
+│   │   └── Joystick_Arduino_Nano/           # Firmware Mando Joystick físico autónomo
+│   ├── Ejecutor/                            # Códigos para el módulo Receptor del Rover
+│   │   ├── Ejecutor_ArduinoNano_ESP32/      # Versión oficial Arduino Nano ESP32 (6x6 + 4WS)
 │   │   ├── Ejecutor_ArduinoMKR_Debug/       # Versión DEBUG con reporte de FIFO, actuadores y watchdog
-│   │   ├── Ejecutor_ArduinoMKR_Optimizado/  # Versión optimizada con failsafe y vaciado de búfer
+│   │   ├── Ejecutor_ArduinoMKR_Optimizado/  # Versión optimizada MKR 1310 con failsafe y vaciado de búfer
 │   │   ├── Ejecutor_ArduinoMKR/             # Versión base
 │   │   └── Ejecutor_ArduinoMKR-v0.1/
 │   └── Interfaz/                            # Scripts de interfaz HMI en Python
