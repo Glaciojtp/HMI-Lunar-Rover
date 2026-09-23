@@ -36,6 +36,8 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+*.spec
+*.exe
 
 # Microsoft Office temporary lock files
 ~$*

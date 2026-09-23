@@ -661,27 +661,44 @@ class HMIRoverDebug:
                 self.cb_puertos_joy['values'] = ["Sin pyserial"]
             return
 
-        puertos = [p.device for p in serial.tools.list_ports.comports()]
+        com_list = list(serial.tools.list_ports.comports())
+        puertos = [p.device for p in com_list]
         if puertos:
             self.cb_puerto_tx['values'] = puertos
             self.cb_puerto_rx['values'] = puertos
             if hasattr(self, 'cb_puertos_joy'):
                 self.cb_puertos_joy['values'] = puertos
 
-            if not self.cb_puerto_tx.get() or self.cb_puerto_tx.get() not in puertos:
-                self.cb_puerto_tx.set(puertos[0])
-            if len(puertos) > 1 and (not self.cb_puerto_rx.get() or self.cb_puerto_rx.get() not in puertos):
-                self.cb_puerto_rx.set(puertos[1])
-            elif not self.cb_puerto_rx.get() or self.cb_puerto_rx.get() not in puertos:
-                self.cb_puerto_rx.set(puertos[0])
+            # Detección inteligente de chips USB-Serie conocidos
+            chips_conocidos = ['ch340', 'cp210', 'ftdi', 'usb-serial', 'arduino', 'esp32', 'silicon labs', 'usb serial']
+            puertos_detectados = []
+            for p in com_list:
+                info_txt = f"{p.description} {p.manufacturer or ''} {p.hwid}".lower()
+                if any(chip in info_txt for chip in chips_conocidos):
+                    puertos_detectados.append(p.device)
 
+            orden_puertos = puertos_detectados + [pt for pt in puertos if pt not in puertos_detectados]
+
+            # Puerto TX (ESP32 Transmisor)
+            if not self.cb_puerto_tx.get() or self.cb_puerto_tx.get() not in puertos:
+                self.cb_puerto_tx.set(orden_puertos[0])
+
+            # Puerto RX (MKR / Nano ESP32 Receptor)
+            if len(orden_puertos) > 1 and (not self.cb_puerto_rx.get() or self.cb_puerto_rx.get() not in puertos):
+                self.cb_puerto_rx.set(orden_puertos[1])
+            elif not self.cb_puerto_rx.get() or self.cb_puerto_rx.get() not in puertos:
+                self.cb_puerto_rx.set(orden_puertos[0])
+
+            # Puerto Mando Joystick (si existe)
             if hasattr(self, 'cb_puertos_joy'):
-                if len(puertos) > 2 and (not self.cb_puertos_joy.get() or self.cb_puertos_joy.get() not in puertos):
-                    self.cb_puertos_joy.set(puertos[2])
-                elif len(puertos) > 1 and (not self.cb_puertos_joy.get() or self.cb_puertos_joy.get() not in puertos):
-                    self.cb_puertos_joy.set(puertos[1])
+                if len(orden_puertos) > 2 and (not self.cb_puertos_joy.get() or self.cb_puertos_joy.get() not in puertos):
+                    self.cb_puertos_joy.set(orden_puertos[2])
+                elif len(orden_puertos) > 1 and (not self.cb_puertos_joy.get() or self.cb_puertos_joy.get() not in puertos):
+                    self.cb_puertos_joy.set(orden_puertos[1])
                 elif not self.cb_puertos_joy.get() or self.cb_puertos_joy.get() not in puertos:
-                    self.cb_puertos_joy.set(puertos[0])
+                    self.cb_puertos_joy.set(orden_puertos[0])
+
+            self.log_consola("SYS", f"Puertos COM escaneados: {', '.join(puertos)} | Preseleccionado TX: {self.cb_puerto_tx.get()}")
         else:
             self.cb_puerto_tx['values'] = ["Sin puertos"]
             self.cb_puerto_rx['values'] = ["Sin puertos"]

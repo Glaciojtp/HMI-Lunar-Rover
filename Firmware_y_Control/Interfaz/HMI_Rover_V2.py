@@ -767,20 +767,43 @@ class HMIRoverRockerBogie:
                 self.cb_puertos_joy.set("Sin pyserial")
             return
 
-        puertos = [p.device for p in serial.tools.list_ports.comports()]
+        com_list = list(serial.tools.list_ports.comports())
+        puertos = [p.device for p in com_list]
         if puertos:
             self.cb_puertos['values'] = puertos
             if hasattr(self, 'cb_puertos_joy'):
                 self.cb_puertos_joy['values'] = puertos
 
-            if not self.cb_puertos.get() or self.cb_puertos.get() not in puertos:
-                self.cb_puertos.set(puertos[0])
+            # Detección inteligente de chip USB-Serie (CH340, CP210, FTDI, Arduino, ESP32)
+            puerto_preferido = None
+            puerto_secundario = None
+            chips_conocidos = ['ch340', 'cp210', 'ftdi', 'usb-serial', 'arduino', 'esp32', 'silicon labs', 'usb serial']
 
+            for p in com_list:
+                info_txt = f"{p.description} {p.manufacturer or ''} {p.hwid}".lower()
+                if any(chip in info_txt for chip in chips_conocidos):
+                    if puerto_preferido is None:
+                        puerto_preferido = p.device
+                    elif puerto_secundario is None:
+                        puerto_secundario = p.device
+
+            # Seleccionar automáticamente el mejor puerto para el Transmisor Rover
+            if not self.cb_puertos.get() or self.cb_puertos.get() not in puertos:
+                self.cb_puertos.set(puerto_preferido if puerto_preferido else puertos[0])
+
+            # Seleccionar automáticamente el puerto del Mando Joystick si hay un segundo
             if hasattr(self, 'cb_puertos_joy'):
-                if len(puertos) > 1 and (not self.cb_puertos_joy.get() or self.cb_puertos_joy.get() not in puertos):
-                    self.cb_puertos_joy.set(puertos[1])
-                elif not self.cb_puertos_joy.get() or self.cb_puertos_joy.get() not in puertos:
-                    self.cb_puertos_joy.set(puertos[0])
+                if not self.cb_puertos_joy.get() or self.cb_puertos_joy.get() not in puertos:
+                    if puerto_secundario:
+                        self.cb_puertos_joy.set(puerto_secundario)
+                    elif len(puertos) > 1:
+                        otro_puerto = [pt for pt in puertos if pt != self.cb_puertos.get()]
+                        self.cb_puertos_joy.set(otro_puerto[0] if otro_puerto else puertos[0])
+                    else:
+                        self.cb_puertos_joy.set(puertos[0])
+
+            if hasattr(self, 'log_consola'):
+                self.log_consola(f"Puertos COM escaneados: {', '.join(puertos)} | Preseleccionado: {self.cb_puertos.get()}")
         else:
             self.cb_puertos['values'] = ["Sin puertos"]
             self.cb_puertos.set("Sin puertos")

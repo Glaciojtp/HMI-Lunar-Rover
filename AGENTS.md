@@ -159,10 +159,12 @@ struct __attribute__((packed)) Paquete {
 ```text
 hmi_rover_cepit/
 ├── AGENTS.md                                # Este documento de referencia y contexto
+├── GUIA_RAPIDA_EQUIPO.md                    # Manual de 1 minuto para el equipo (100% Windows)
 ├── ESQUEMATICO_MKR1310.md                   # Esquemático completo de conexiones y pinout del MKR
 ├── ESQUEMATICO_NANO_ESP32.md                # Esquemático completo de conexiones y pinout del Nano ESP32
-├── Lanzar_HMI_Rover.bat                     # Lanzador Windows de la interfaz Python normal
-├── Lanzar_HMI_Debug.bat                     # Lanzador Windows de la interfaz Python modo DEBUG
+├── Compilar_HMI_a_EXE.bat                   # Generador de 1 clic del ejecutable HMI_Rover_Lunar_V2.exe
+├── Lanzar_HMI_Rover.bat                     # Lanzador Windows inteligente con autoinstalación de librerías
+├── Lanzar_HMI_Debug.bat                     # Lanzador Windows inteligente modo DEBUG
 ├── Subir_Cambios.bat                        # Sincronizador de 1 clic con GitHub
 ├── WindowsFormsApp4/                        # Interfaz gráfica de telemetría en C# (.NET)
 ├── WindowsFormsApp4.slnx                    # Archivo de solución de Visual Studio
