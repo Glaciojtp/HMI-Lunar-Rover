@@ -53,6 +53,8 @@ class HMIRoverDebug:
         self.hilo_rx = None
 
         self.ejecutando = True
+        self.txt_consola = None
+        self._log_buffer = []
 
         # Métricas de transmisión y recepción
         self.contador_tx = 0
@@ -219,8 +221,6 @@ class HMIRoverDebug:
         self.badge_validacion = tk.Label(top_bar, text="⚡ VALIDACIÓN: EN ESPERA", bg="#2a2e3f", fg="#94a3b8",
                                          font=("Segoe UI", 9, "bold"), padx=10, pady=2)
         self.badge_validacion.pack(side="right", padx=5)
-
-        self.actualizar_lista_puertos()
 
         # =========================================================================
         # 2. CUERPO PRINCIPAL: IZQUIERDA (CONTROLES), DERECHA (DOBLE ESQUEMA 2D)
@@ -518,7 +518,14 @@ class HMIRoverDebug:
         self.txt_consola.tag_config("TAG_WARN", foreground="#fb923c")      # Naranja: Alertas
         self.txt_consola.tag_config("TAG_SYS", foreground="#94a3b8")       # Gris: Sistema
 
-        self.log_consola("SYS", "HMI Rover Debug cargado. Conecte los puertos COM de Transmisor (ESP32) y/o Receptor (MKR).")
+        # Volcar logs que se hayan generado antes de crear el widget
+        if hasattr(self, '_log_buffer') and self._log_buffer:
+            for tag, msg in self._log_buffer:
+                self.log_consola(tag, msg)
+            self._log_buffer.clear()
+
+        self.log_consola("SYS", "HMI Rover Debug cargado. Conecte los puertos COM de Transmisor (ESP32) y/o Receptor (MKR / Nano ESP32).")
+        self.actualizar_lista_puertos()
 
     def crear_slider(self, parent, nombre, variable, desde, hasta, callback=None):
         frm = ttk.Frame(parent, style="Card.TFrame")
@@ -1307,10 +1314,18 @@ class HMIRoverDebug:
             "SYS": "TAG_SYS"
         }
         style = tag_map.get(tag, "TAG_SYS")
-        self.txt_consola.insert("end", t_str, "TAG_SYS")
-        self.txt_consola.insert("end", texto + "\n", style)
-        if self.auto_scroll.get():
-            self.txt_consola.see("end")
+        if hasattr(self, 'txt_consola') and self.txt_consola is not None:
+            try:
+                self.txt_consola.insert("end", t_str, "TAG_SYS")
+                self.txt_consola.insert("end", str(texto) + "\n", style)
+                if hasattr(self, 'auto_scroll') and self.auto_scroll.get():
+                    self.txt_consola.see("end")
+                return
+            except Exception:
+                pass
+        print(f"{t_str} [{tag}] {texto}")
+        if hasattr(self, '_log_buffer'):
+            self._log_buffer.append((tag, texto))
 
     def limpiar_consola(self):
         self.txt_consola.delete("1.0", "end")

@@ -52,6 +52,8 @@ class HMIRoverRockerBogie:
         self.conectado = False
         self.hilo_serial = None
         self.ejecutando = True
+        self.txt_consola = None
+        self._log_buffer = []
 
         # Estado dinámico de control
         self.comando_actual = " "
@@ -144,7 +146,6 @@ class HMIRoverRockerBogie:
 
         self.cb_puertos = ttk.Combobox(top_frame, width=11, state="readonly")
         self.cb_puertos.pack(side="left", padx=4)
-        self.actualizar_lista_puertos()
 
         btn_refrescar = tk.Button(top_frame, text="🔄", bg="#334155", fg="#ffffff", font=("Segoe UI", 8, "bold"),
                                   command=self.actualizar_lista_puertos, relief="flat", padx=6, pady=2)
@@ -472,7 +473,16 @@ class HMIRoverRockerBogie:
         self.txt_consola = tk.Text(card_consola, height=3, bg="#0f111a", fg="#38b000",
                                    font=("Consolas", 9), insertbackground="#ffffff", relief="flat")
         self.txt_consola.pack(fill="x")
+
+        # Volcar logs que se hayan generado antes de crear el widget
+        if hasattr(self, '_log_buffer') and self._log_buffer:
+            for item in self._log_buffer:
+                self.txt_consola.insert("end", item + "\n")
+            self._log_buffer.clear()
+            self.txt_consola.see("end")
+
         self.log_consola("HMI Rocker-Bogie V2.0 cargado. 6 Motores + 4 Servos independientes listos.")
+        self.actualizar_lista_puertos()
 
     def crear_slider(self, parent, nombre, variable, desde, hasta, callback=None):
         frm = ttk.Frame(parent, style="Card.TFrame")
@@ -1086,8 +1096,17 @@ class HMIRoverRockerBogie:
 
     def log_consola(self, texto):
         t_str = time.strftime("[%H:%M:%S] ")
-        self.txt_consola.insert("end", t_str + texto + "\n")
-        self.txt_consola.see("end")
+        linea = t_str + str(texto)
+        if hasattr(self, 'txt_consola') and self.txt_consola is not None:
+            try:
+                self.txt_consola.insert("end", linea + "\n")
+                self.txt_consola.see("end")
+                return
+            except Exception:
+                pass
+        print(linea)
+        if hasattr(self, '_log_buffer'):
+            self._log_buffer.append(linea)
 
     def limpiar_consola(self):
         self.txt_consola.delete("1.0", "end")
