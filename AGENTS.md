@@ -3,6 +3,10 @@
 > **DOCUMENTO PARA AGENTES DE INTELIGENCIA ARTIFICIAL Y DESARROLLADORES**  
 > Este documento consolida todo el estado de conservación técnico, arquitectura de hardware, conexionado de pines, protocolo de comunicación y directrices de desarrollo para el proyecto **Rover Lunar V2.0**. Cualquier agente o desarrollador que intervenga en el repositorio debe seguir rigurosamente las especificaciones aquí descritas.
 
+> [!IMPORTANT]
+> **REGLA FUNDAMENTAL DE COMUNICACIÓN Y FORMATO: PROHIBICIÓN ESTRICTA DE EMOJIS**  
+> Queda terminantemente prohibido el uso de emojis en cualquier respuesta, documentación, código fuente, comentario, archivo o mensaje de commit. Todo agente de IA debe comunicarse y redactar con un estilo técnico, formal, limpio y sobrio, sin ningún tipo de emoticón o símbolo gráfico ornamental.
+
 ---
 
 ## 1. Propósito del Proyecto y Visión General
@@ -159,43 +163,43 @@ struct __attribute__((packed)) Paquete {
 ```text
 HMI-Lunar-Rover/
 │
-├── 📂 01_Oficial/                             # Firmwares e interfaz en producción
+├── 01_Oficial/                                # Firmwares e interfaz en produccion
 │   ├── HMI/                                   # HMI_Rover_V2.py (GUI principal de pilotaje)
 │   ├── Receptor_Rover_NanoESP32/              # Ejecutor_ArduinoNano_ESP32.ino (Receptor Oficial)
 │   ├── Receptor_Rover_MKR1310/                # Ejecutor_ArduinoMKR_Optimizado.ino (Receptor previo)
 │   ├── Transmisor_PC_ESP32C3/                 # Control_ESP32_C3_Optimizado.ino (Puente USB-RF)
-│   └── Mando_Joystick_Fisico/                 # Joystick_Arduino_Nano.ino (Mando RC autónomo)
+│   └── Mando_Joystick_Fisico/                 # Joystick_Arduino_Nano.ino (Mando RC autonomo)
 │
-├── 📂 02_Debug_y_Pruebas/                     # Herramientas de depuración y laboratorio
-│   ├── HMI_Debug/                             # HMI_Rover_Debug.py (Telemetría y validación)
+├── 02_Debug_y_Pruebas/                        # Herramientas de depuracion y laboratorio
+│   ├── HMI_Debug/                             # HMI_Rover_Debug.py (Telemetria y validacion)
 │   ├── Firmware_Debug/                        # Firmwares con volcado HEX y logs FIFO
 │   ├── Test_RF_Unitarios/                     # Sketches de prueba de radiofrecuencia NRF24L01
-│   └── Lanzar_HMI_Debug.bat                   # Acceso directo al modo diagnóstico
+│   └── Lanzar_HMI_Debug.bat                   # Acceso directo al modo diagnostico
 │
-├── 📂 03_Documentacion_y_Guias/               # Manuales y planos de conexionado
+├── 03_Documentacion_y_Guias/                  # Manuales y planos de conexionado
 │   ├── Guias/                                 # GUIA_RAPIDA_EQUIPO, GUIA_JOYSTICK_HARDWARE, etc.
 │   └── Esquematicos/                          # ESQUEMATICO_NANO_ESP32 y ESQUEMATICO_MKR1310
 │
-├── 📂 04_Legacy_y_Versiones_Previas/          # Archivos históricos o de grupos anteriores
+├── 04_Legacy_y_Versiones_Previas/             # Archivos historicos o de grupos anteriores
 │   ├── WindowsFormsApp4/                      # Interfaz en C# / .NET del grupo anterior
 │   ├── WindowsFormsApp4.slnx
-│   ├── Firmwares_Historicos/                  # Códigos de referencia v0.1, v0.2, LOLIN, etc.
+│   ├── Firmwares_Historicos/                  # Codigos de referencia v0.1, v0.2, LOLIN, etc.
 │   ├── Interfaces_Historicas/                 # Scripts Python preliminares
 │   └── Documentos_Originales/                 # Contexto actual.docx original
 │
-├── 📂 Herramientas_Docker_Wine/               # Simulación de Windows limpio en contenedor
-│   ├── Dockerfile.wine-test                   # Definición del entorno reproducible
+├── Herramientas_Docker_Wine/                  # Simulacion de Windows limpio en contenedor
+│   ├── Dockerfile.wine-test                   # Definicion del entorno reproducible
 │   ├── run_simulation.sh                     # Runner de pruebas automatizadas
 │   ├── Simular_en_Docker.bat                  # Lanzador Windows (1 clic)
 │   └── Simular_en_Docker.sh                   # Lanzador Linux / WSL
 │
-│   ─── SOLO ARCHIVOS ESENCIALES EN LA RAÍZ ───
-├── 📄 README.md                               # Guía principal del proyecto y catálogo
-├── 📄 AGENTS.md                               # Contexto técnico para desarrolladores e IA
-├── ⚡ Lanzar_HMI_Rover.bat                     # Lanzador inteligente en Windows (1 clic)
-├── 🔨 Compilar_HMI_a_EXE.bat                  # Compilador de 1 clic a HMI_Rover_Lunar_V2.exe
-├── 🚀 Subir_Cambios.bat                       # Sincronizador rápido con GitHub
-└── ⚙️ .gitignore                              # Exclusiones de Git
+│   ─── SOLO ARCHIVOS ESENCIALES EN LA RAIZ ───
+├── README.md                                  # Guia principal del proyecto y catalogo
+├── AGENTS.md                                  # Contexto tecnico para desarrolladores e IA
+├── Lanzar_HMI_Rover.bat                       # Lanzador inteligente en Windows (1 clic)
+├── Compilar_HMI_a_EXE.bat                     # Compilador de 1 clic a HMI_Rover_Lunar_V2.exe
+├── Subir_Cambios.bat                          # Sincronizador rapido con GitHub
+└── .gitignore                                 # Exclusiones de Git
 ```
 
 ---
@@ -217,3 +221,4 @@ Cualquier agente que proponga cambios o refactorizaciones debe:
 2. **Respetar la restricción anti-bloqueo:** Nunca introducir llamadas a `delay()` en la lógica de transmisión ni recepción.
 3. **Mantener los límites de seguridad de actuadores:** No programar valores angulares fuera de `[10, 170]` grados y conservar la rutina de parada en caso de pérdida de enlace (`TIMEOUT_MS = 1000`).
 4. **Conservar las frecuencias asignadas:** Mantener el canal RF en 108 a 250 kbps a menos que se realice una reconfiguración coordinada de radio en ambos firmwares.
+5. **Cero uso de emojis (Regla Estricta):** Queda terminantemente prohibido utilizar emojis en explicaciones, comentarios, documentación, commits o respuestas. El usuario detesta los emojis; utilizar únicamente texto sobrio, formal y directo.

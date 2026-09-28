@@ -1,28 +1,28 @@
-# 🛰️ ROVER LUNAR V2.0 — PLATAFORMA ROBÓTICA ROCKER-BOGIE
+# ROVER LUNAR V2.0 — PLATAFORMA ROBOTICA ROCKER-BOGIE
 
-> **Repositorio Oficial de Firmware, Control y Software de Estación Terrena (HMI)**  
-> Desarrollado para la misión análoga de exploración lunar y aplicaciones industriales terrestres en minería subterránea e inspección en espacios confinados.  
-> **Equipo CEPIT:** Joaquín, Lucas, Lucio, Sebastián, Emir, Benjamín, Keila y Ainsworth.
-
----
-
-## 📌 Tabla de Contenidos
-1. [Visión General del Proyecto](#-visión-general-del-proyecto)
-2. [Arquitectura de Integración del Sistema](#-arquitectura-de-integración-del-sistema)
-3. [Catálogo de Firmwares (.ino) y Microcontroladores](#-catálogo-de-firmwares-ino-y-microcontroladores)
-   - [Mando de Radiocontrol Físico Autónomo](#1-mando-de-radiocontrol-físico-autónomo-emisor)
-   - [Módulo Transmisor PC / Puente RF](#2-módulo-transmisor-pc--puente-serie-rf-emisor)
-   - [Electrónica de a Bordo del Rover (Última Versión Oficial)](#3-electrónica-de-a-bordo-del-rover-receptor---versión-oficial)
-   - [Electrónica de a Bordo del Rover (Versión Previa MKR)](#4-electrónica-de-a-bordo-del-rover-receptor---versión-previa-mkr)
-4. [Guía Paso a Paso para Instalar y Flashear cada .ino](#-guía-paso-a-paso-para-instalar-y-flashear-cada-ino)
-5. [Software HMI de Estación Terrena (Windows)](#-software-hmi-de-estación-terrena-windows)
-6. [Reglas Críticas de Seguridad y Lecciones de Hardware](#-reglas-críticas-de-seguridad-y-lecciones-de-hardware)
-7. [Estructura del Repositorio](#-estructura-del-repositorio)
-8. [Documentación Técnica Detallada](#-documentación-técnica-detallada)
+> **Repositorio Oficial de Firmware, Control y Software de Estacion Terrena (HMI)**  
+> Desarrollado para la mision analoga de exploracion lunar y aplicaciones industriales terrestres en mineria subterranea e inspeccion en espacios confinados.  
+> **Equipo CEPIT:** Joaquin, Lucas, Lucio, Sebastian, Emir, Benjamin, Keila y Ainsworth.
 
 ---
 
-## 🌌 Visión General del Proyecto
+## Tabla de Contenidos
+1. [Vision General del Proyecto](#vision-general-del-proyecto)
+2. [Arquitectura de Integracion del Sistema](#arquitectura-de-integracion-del-sistema)
+3. [Catalogo de Firmwares (.ino) y Microcontroladores](#catalogo-de-firmwares-ino-y-microcontroladores)
+   - [Mando de Radiocontrol Fisico Autonomo](#1-mando-de-radiocontrol-fisico-autonomo-emisor)
+   - [Modulo Transmisor PC / Puente RF](#2-modulo-transmisor-pc--puente-serie-rf-emisor)
+   - [Electronica de a Bordo del Rover (Ultima Version Oficial)](#3-electronica-de-a-bordo-del-rover-receptor---version-oficial)
+   - [Electronica de a Bordo del Rover (Version Previa MKR)](#4-electronica-de-a-bordo-del-rover-receptor---version-previa-mkr)
+4. [Guia Paso a Paso para Instalar y Flashear cada .ino](#guia-paso-a-paso-para-instalar-y-flashear-cada-ino)
+5. [Software HMI de Estacion Terrena (Windows)](#software-hmi-de-estacion-terrena-windows)
+6. [Reglas Criticas de Seguridad y Lecciones de Hardware](#reglas-criticas-de-seguridad-y-lecciones-de-hardware)
+7. [Estructura del Repositorio](#estructura-del-repositorio)
+8. [Documentacion Tecnica Detallada](#documentacion-tecnica-detallada)
+
+---
+
+## Vision General del Proyecto
 
 El **Rover Lunar V2.0** es un vehículo robótico de exploración móvil diseñado para superar terrenos altamente agrestes, pendientes de hasta 20° y regolito simulado mediante una suspensión mecánica de tipo **Rocker-Bogie** con:
 * **Tracción 6x6:** Seis motores de corriente continua con caja reductora coordinados mediante un puente H doble L9110S.
@@ -31,7 +31,7 @@ El **Rover Lunar V2.0** es un vehículo robótico de exploración móvil diseña
 
 ---
 
-## 🏗️ Arquitectura de Integración del Sistema
+## Arquitectura de Integración del Sistema
 
 ```mermaid
 graph TD
@@ -50,7 +50,7 @@ graph TD
     end
 
     subgraph ROVER ["3. Electrónica de a Bordo del Rover (Receptor)"]
-        MCU_ROVER["Microcontrolador de a Bordo:\n★ Arduino Nano ESP32 (Oficial)\no Arduino MKR 1310"]
+        MCU_ROVER["Microcontrolador de a Bordo:\nArduino Nano ESP32 (Oficial)\no Arduino MKR 1310"]
         RF_RX["NRF24L01+ Receptor (3.3V)"]
         HBRIDGE["Puente H L9110S"]
         SERVOS["4 Servomotores de Dirección:\nS1 (Del. Izq) - S2 (Del. Der)\nS3 (Tras. Izq) - S4 (Tras. Der)"]
@@ -65,13 +65,13 @@ graph TD
 
 ---
 
-## 💻 Catálogo de Firmwares (.ino) y Microcontroladores
+## Catálogo de Firmwares (.ino) y Microcontroladores
 
 A continuación se detalla cada código fuente del proyecto, su ubicación exacta, su función y **qué microcontrolador físico está previsto para su funcionamiento**:
 
 | Archivo `.ino` | Carpeta en el Repositorio | Microcontrolador Previsto (Última Versión) | Rol en el Sistema |
 |---|---|---|---|
-| **`Ejecutor_ArduinoNano_ESP32.ino`** | [`01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32/`](01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32) | ⭐ **Arduino Nano ESP32** (ESP32-S3 a 3.3V) | **Receptor Oficial del Rover:** 6 motores + 4 servos independientes. |
+| **`Ejecutor_ArduinoNano_ESP32.ino`** | [`01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32/`](01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32) | **Arduino Nano ESP32** (ESP32-S3 a 3.3V) [Oficial] | **Receptor Oficial del Rover:** 6 motores + 4 servos independientes. |
 | **`Joystick_Arduino_Nano.ino`** | [`01_Oficial/Mando_Joystick_Fisico/Joystick_Arduino_Nano/`](01_Oficial/Mando_Joystick_Fisico/Joystick_Arduino_Nano) | **Arduino Nano Clásico (ATmega328P)** o **Arduino Nano ESP32** | **Mando Joystick Físico Autónomo:** Control inalámbrico sin PC. |
 | **`Control_ESP32_C3_Optimizado.ino`** | [`01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado/`](01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado) | **ESP32-C3 SuperMini** / **LOLIN C3 Mini** (RISC-V a 3.3V) | **Transmisor PC:** Puente USB Serial a Radiofrecuencia RF24. |
 | **`Control_ESP32_C3_Debug.ino`** | [`02_Debug_y_Pruebas/Firmware_Debug/Control_ESP32_C3_Debug/`](02_Debug_y_Pruebas/Firmware_Debug/Control_ESP32_C3_Debug) | **ESP32-C3 SuperMini** / **LOLIN C3 Mini** | **Transmisor Modo Debug:** Reporte de volcado HEX y métricas de tasa. |
@@ -80,7 +80,7 @@ A continuación se detalla cada código fuente del proyecto, su ubicación exact
 
 ---
 
-## 🛠️ Guía Paso a Paso para Instalar y Flashear cada .ino
+## Guía Paso a Paso para Instalar y Flashear cada .ino
 
 ### Preparación del Entorno (Arduino IDE 2.x)
 1. Descargá e instalá **[Arduino IDE 2.x](https://www.arduino.cc/en/software)**.
@@ -139,7 +139,7 @@ A continuación se detalla cada código fuente del proyecto, su ubicación exact
 
 ---
 
-## 🖥️ Software HMI de Estación Terrena (Windows)
+## Software HMI de Estacion Terrena (Windows)
 
 Para operar el Rover desde la computadora, el repositorio incluye dos interfaces gráficas desarrolladas en Python con Tkinter, completamente libres de dependencias complejas y con detección inteligente de puertos COM:
 
@@ -157,7 +157,7 @@ Elegí el método que prefieras:
 
 ---
 
-## ⚠️ Reglas Críticas de Seguridad y Lecciones de Hardware
+## Reglas Criticas de Seguridad y Lecciones de Hardware
 
 > [!CAUTION]
 > **1. ALIMENTACIÓN DEL NRF24L01: NUNCA CONECTAR A 5V**  
@@ -181,55 +181,55 @@ Elegí el método que prefieras:
 
 ---
 
-## 📂 Estructura del Repositorio
+## Estructura del Repositorio
 
 El repositorio se encuentra estrictamente organizado por módulos funcionales:
 
 ```text
 HMI-Lunar-Rover/
 │
-├── 📂 01_Oficial/                             # Firmwares e interfaz en producción
+├── 01_Oficial/                                # Firmwares e interfaz en produccion
 │   ├── HMI/                                   # HMI_Rover_V2.py (GUI principal de pilotaje)
 │   ├── Receptor_Rover_NanoESP32/              # Ejecutor_ArduinoNano_ESP32.ino (Receptor Oficial)
 │   ├── Receptor_Rover_MKR1310/                # Ejecutor_ArduinoMKR_Optimizado.ino (Receptor previo)
 │   ├── Transmisor_PC_ESP32C3/                 # Control_ESP32_C3_Optimizado.ino (Puente USB-RF)
-│   └── Mando_Joystick_Fisico/                 # Joystick_Arduino_Nano.ino (Mando RC autónomo)
+│   └── Mando_Joystick_Fisico/                 # Joystick_Arduino_Nano.ino (Mando RC autonomo)
 │
-├── 📂 02_Debug_y_Pruebas/                     # Herramientas de depuración y laboratorio
-│   ├── HMI_Debug/                             # HMI_Rover_Debug.py (Telemetría y validación)
+├── 02_Debug_y_Pruebas/                        # Herramientas de depuracion y laboratorio
+│   ├── HMI_Debug/                             # HMI_Rover_Debug.py (Telemetria y validacion)
 │   ├── Firmware_Debug/                        # Firmwares con volcado HEX y logs FIFO
 │   ├── Test_RF_Unitarios/                     # Sketches de prueba de radiofrecuencia NRF24L01
-│   └── Lanzar_HMI_Debug.bat                   # Acceso directo al modo diagnóstico
+│   └── Lanzar_HMI_Debug.bat                   # Acceso directo al modo diagnostico
 │
-├── 📂 03_Documentacion_y_Guias/               # Manuales y planos de conexionado
+├── 03_Documentacion_y_Guias/                  # Manuales y planos de conexionado
 │   ├── Guias/                                 # GUIA_RAPIDA_EQUIPO, GUIA_JOYSTICK_HARDWARE, etc.
 │   └── Esquematicos/                          # ESQUEMATICO_NANO_ESP32 y ESQUEMATICO_MKR1310
 │
-├── 📂 04_Legacy_y_Versiones_Previas/          # Archivos históricos o de grupos anteriores
+├── 04_Legacy_y_Versiones_Previas/             # Archivos historicos o de grupos anteriores
 │   ├── WindowsFormsApp4/                      # Interfaz en C# / .NET del grupo anterior
 │   ├── WindowsFormsApp4.slnx
-│   ├── Firmwares_Historicos/                  # Códigos de referencia v0.1, v0.2, LOLIN, etc.
+│   ├── Firmwares_Historicos/                  # Codigos de referencia v0.1, v0.2, LOLIN, etc.
 │   ├── Interfaces_Historicas/                 # Scripts Python preliminares
 │   └── Documentos_Originales/                 # Contexto actual.docx original
 │
-├── 📂 Herramientas_Docker_Wine/               # Simulación de Windows limpio en contenedor
-│   ├── Dockerfile.wine-test                   # Definición del entorno reproducible
+├── Herramientas_Docker_Wine/                  # Simulacion de Windows limpio en contenedor
+│   ├── Dockerfile.wine-test                   # Definicion del entorno reproducible
 │   ├── run_simulation.sh                     # Runner de pruebas automatizadas
 │   ├── Simular_en_Docker.bat                  # Lanzador Windows (1 clic)
 │   └── Simular_en_Docker.sh                   # Lanzador Linux / WSL
 │
-│   ─── SOLO ARCHIVOS ESENCIALES EN LA RAÍZ ───
-├── 📄 README.md                               # Guía principal del proyecto y catálogo
-├── 📄 AGENTS.md                               # Contexto técnico para desarrolladores e IA
-├── ⚡ Lanzar_HMI_Rover.bat                     # Lanzador inteligente en Windows (1 clic)
-├── 🔨 Compilar_HMI_a_EXE.bat                  # Compilador de 1 clic a HMI_Rover_Lunar_V2.exe
-├── 🚀 Subir_Cambios.bat                       # Sincronizador rápido con GitHub
-└── ⚙️ .gitignore                              # Exclusiones de Git
+│   ─── SOLO ARCHIVOS ESENCIALES EN LA RAIZ ───
+├── README.md                                  # Guia principal del proyecto y catalogo
+├── AGENTS.md                                  # Contexto tecnico para desarrolladores e IA
+├── Lanzar_HMI_Rover.bat                       # Lanzador inteligente en Windows (1 clic)
+├── Compilar_HMI_a_EXE.bat                     # Compilador de 1 clic a HMI_Rover_Lunar_V2.exe
+├── Subir_Cambios.bat                          # Sincronizador rapido con GitHub
+└── .gitignore                                 # Exclusiones de Git
 ```
 
 ---
 
-## 📚 Documentación Técnica Detallada
+## Documentacion Tecnica Detallada
 
 * Para profundizar en los detalles de conexionado pin a pin y pines libres del receptor: [`03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md`](03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md).
 * Para armar el mando físico con joysticks y potenciómetro: [`03_Documentacion_y_Guias/Guias/GUIA_JOYSTICK_HARDWARE.md`](03_Documentacion_y_Guias/Guias/GUIA_JOYSTICK_HARDWARE.md).
