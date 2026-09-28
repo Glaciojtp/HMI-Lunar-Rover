@@ -48,7 +48,7 @@ if errorlevel 1 (
 echo.
 echo [2/3] Compilando HMI_Rover_V2.py en un unico archivo .EXE...
 echo (Este proceso puede demorar entre 30 y 60 segundos, por favor espera...)
-cd /d "%~dp0Firmware_y_Control\Interfaz"
+cd /d "%~dp001_Oficial\HMI"
 %PY_CMD% -m PyInstaller --clean --noconsole --onefile --name "HMI_Rover_Lunar_V2" HMI_Rover_V2.py
 
 if errorlevel 1 (
@@ -64,14 +64,14 @@ echo.
 echo [3/3] Finalizando y organizando archivos...
 cd /d "%~dp0"
 if exist "%~dp0HMI_Rover_Lunar_V2.exe" del /f /q "%~dp0HMI_Rover_Lunar_V2.exe"
-if exist "%~dp0Firmware_y_Control\Interfaz\dist\HMI_Rover_Lunar_V2.exe" (
-    move /y "%~dp0Firmware_y_Control\Interfaz\dist\HMI_Rover_Lunar_V2.exe" "%~dp0HMI_Rover_Lunar_V2.exe" >nul
+if exist "%~dp001_Oficial\HMI\dist\HMI_Rover_Lunar_V2.exe" (
+    move /y "%~dp001_Oficial\HMI\dist\HMI_Rover_Lunar_V2.exe" "%~dp0HMI_Rover_Lunar_V2.exe" >nul
 )
 
 :: Limpieza de carpetas temporales de compilación
-if exist "%~dp0Firmware_y_Control\Interfaz\build" rmdir /s /q "%~dp0Firmware_y_Control\Interfaz\build"
-if exist "%~dp0Firmware_y_Control\Interfaz\dist" rmdir /s /q "%~dp0Firmware_y_Control\Interfaz\dist"
-if exist "%~dp0Firmware_y_Control\Interfaz\HMI_Rover_Lunar_V2.spec" del /f /q "%~dp0Firmware_y_Control\Interfaz\HMI_Rover_Lunar_V2.spec"
+if exist "%~dp001_Oficial\HMI\build" rmdir /s /q "%~dp001_Oficial\HMI\build"
+if exist "%~dp001_Oficial\HMI\dist" rmdir /s /q "%~dp001_Oficial\HMI\dist"
+if exist "%~dp001_Oficial\HMI\HMI_Rover_Lunar_V2.spec" del /f /q "%~dp001_Oficial\HMI\HMI_Rover_Lunar_V2.spec"
 
 echo.
 echo ========================================================

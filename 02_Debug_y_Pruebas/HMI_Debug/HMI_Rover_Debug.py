@@ -1323,7 +1323,12 @@ class HMIRoverDebug:
                 return
             except Exception:
                 pass
-        print(f"{t_str} [{tag}] {texto}")
+        try:
+            if sys.stdout is not None and hasattr(sys.stdout, 'write'):
+                sys.stdout.write(f"{t_str} [{tag}] {texto}\n")
+                sys.stdout.flush()
+        except Exception:
+            pass
         if hasattr(self, '_log_buffer'):
             self._log_buffer.append((tag, texto))
 
@@ -1605,7 +1610,36 @@ class HMIRoverDebug:
         self.root.after(50, self.bucle_periodico_ui) # 20 Hz
 
 
+def configurar_captura_errores():
+    import traceback
+    import os
+
+    def manejador_excepciones(tipo, valor, tb):
+        err_msg = "".join(traceback.format_exception(tipo, valor, tb))
+        base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        log_path = os.path.join(base_dir, "hmi_debug_crash_log.txt")
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"\n{'='*60}\nREPORTE DE ERROR DEBUG (CRASH) - {time.strftime('%Y-%m-%d %H:%M:%S')}\n{'='*60}\n{err_msg}\n")
+        except Exception:
+            pass
+        try:
+            messagebox.showerror(
+                "Error Inesperado - HMI Rover Debug",
+                f"Se produjo un fallo al ejecutar la aplicación de depuración:\n\n{valor}\n\n"
+                f"Detalles técnicos guardados en:\n{log_path}"
+            )
+        except Exception:
+            pass
+
+    sys.excepthook = manejador_excepciones
+
+
 if __name__ == "__main__":
-    ventana_principal = tk.Tk()
-    app = HMIRoverDebug(ventana_principal)
-    ventana_principal.mainloop()
+    configurar_captura_errores()
+    try:
+        ventana_principal = tk.Tk()
+        app = HMIRoverDebug(ventana_principal)
+        ventana_principal.mainloop()
+    except Exception as e:
+        sys.excepthook(*sys.exc_info())

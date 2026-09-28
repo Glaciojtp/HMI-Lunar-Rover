@@ -67,6 +67,6 @@ if errorlevel 1 (
 
 :: 5. Iniciar la interfaz HMI
 echo [OK] Iniciando HMI_Rover_V2.py...
-cd /d "%~dp0Firmware_y_Control\Interfaz"
+cd /d "%~dp001_Oficial\HMI"
 start "" %PY_CMD% HMI_Rover_V2.py
 exit /b 0

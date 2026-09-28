@@ -57,6 +57,7 @@ $RECYCLE.BIN/
 
 # Logs & Diagnostics
 *.log
+*crash_log.txt
 logs/
 
 # Editor & IDE settings

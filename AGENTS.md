@@ -157,40 +157,45 @@ struct __attribute__((packed)) Paquete {
 ## 6. Estructura del Repositorio
 
 ```text
-hmi_rover_cepit/
-├── AGENTS.md                                # Este documento de referencia y contexto
-├── GUIA_RAPIDA_EQUIPO.md                    # Manual de 1 minuto para el equipo (100% Windows)
-├── ESQUEMATICO_MKR1310.md                   # Esquemático completo de conexiones y pinout del MKR
-├── ESQUEMATICO_NANO_ESP32.md                # Esquemático completo de conexiones y pinout del Nano ESP32
-├── Compilar_HMI_a_EXE.bat                   # Generador de 1 clic del ejecutable HMI_Rover_Lunar_V2.exe
-├── Lanzar_HMI_Rover.bat                     # Lanzador Windows inteligente con autoinstalación de librerías
-├── Lanzar_HMI_Debug.bat                     # Lanzador Windows inteligente modo DEBUG
-├── Subir_Cambios.bat                        # Sincronizador de 1 clic con GitHub
-├── WindowsFormsApp4/                        # Interfaz gráfica de telemetría en C# (.NET)
-├── WindowsFormsApp4.slnx                    # Archivo de solución de Visual Studio
-├── Firmware_y_Control/                      # Firmware de microcontroladores y software HMI
-│   ├── Contexto actual.docx                 # Documento técnico original del equipo
-│   ├── Codigo_MKR_28-8/                     # Código de referencia preliminar para MKR
-│   ├── Control/                             # Códigos para el módulo Transmisor (ESP32-C3 y Arduino Nano)
-│   │   ├── Control_ESP32_C3_Debug/          # Versión DEBUG con telemetría RF y volcado HEX
-│   │   ├── Control_ESP32_C3_Optimizado/     # Versión optimizada de transmisión
-│   │   ├── Control_LOLIN-C3-MINI/           # Versión base LOLIN C3 Mini
-│   │   ├── Control_LOLIN-C3-MINI-v0.2/
-│   │   ├── Control_LOLIN_C3_MINI-v0.1/
-│   │   └── Joystick_Arduino_Nano/           # Firmware Mando Joystick físico autónomo
-│   ├── Ejecutor/                            # Códigos para el módulo Receptor del Rover
-│   │   ├── Ejecutor_ArduinoNano_ESP32/      # Versión oficial Arduino Nano ESP32 (6x6 + 4WS)
-│   │   ├── Ejecutor_ArduinoMKR_Debug/       # Versión DEBUG con reporte de FIFO, actuadores y watchdog
-│   │   ├── Ejecutor_ArduinoMKR_Optimizado/  # Versión optimizada MKR 1310 con failsafe y vaciado de búfer
-│   │   ├── Ejecutor_ArduinoMKR/             # Versión base
-│   │   └── Ejecutor_ArduinoMKR-v0.1/
-│   └── Interfaz/                            # Scripts de interfaz HMI en Python
-│       ├── HMI_Rover_Debug.py               # Script HMI DEBUG con visor de tramas TX/RX en tiempo real
-│       ├── HMI_Rover_V2.py                  # Script principal estándar con GUI y sliders
-│       ├── Interfaz-Rover-29-8-v2.py
-│       ├── Interfaz-Rover-29-8-v3.py
-│       └── Interfaz-Rover_29-8.py
-└── Informacion del grupo anterior/          # Documentación y antecedentes históricos
+HMI-Lunar-Rover/
+│
+├── 📂 01_Oficial/                             # Firmwares e interfaz en producción
+│   ├── HMI/                                   # HMI_Rover_V2.py (GUI principal de pilotaje)
+│   ├── Receptor_Rover_NanoESP32/              # Ejecutor_ArduinoNano_ESP32.ino (Receptor Oficial)
+│   ├── Receptor_Rover_MKR1310/                # Ejecutor_ArduinoMKR_Optimizado.ino (Receptor previo)
+│   ├── Transmisor_PC_ESP32C3/                 # Control_ESP32_C3_Optimizado.ino (Puente USB-RF)
+│   └── Mando_Joystick_Fisico/                 # Joystick_Arduino_Nano.ino (Mando RC autónomo)
+│
+├── 📂 02_Debug_y_Pruebas/                     # Herramientas de depuración y laboratorio
+│   ├── HMI_Debug/                             # HMI_Rover_Debug.py (Telemetría y validación)
+│   ├── Firmware_Debug/                        # Firmwares con volcado HEX y logs FIFO
+│   ├── Test_RF_Unitarios/                     # Sketches de prueba de radiofrecuencia NRF24L01
+│   └── Lanzar_HMI_Debug.bat                   # Acceso directo al modo diagnóstico
+│
+├── 📂 03_Documentacion_y_Guias/               # Manuales y planos de conexionado
+│   ├── Guias/                                 # GUIA_RAPIDA_EQUIPO, GUIA_JOYSTICK_HARDWARE, etc.
+│   └── Esquematicos/                          # ESQUEMATICO_NANO_ESP32 y ESQUEMATICO_MKR1310
+│
+├── 📂 04_Legado_y_Versiones_Previas/          # Archivos históricos o de grupos anteriores
+│   ├── WindowsFormsApp4/                      # Interfaz en C# / .NET del grupo anterior
+│   ├── WindowsFormsApp4.slnx
+│   ├── Firmwares_Historicos/                  # Códigos de referencia v0.1, v0.2, LOLIN, etc.
+│   ├── Interfaces_Historicas/                 # Scripts Python preliminares
+│   └── Documentos_Originales/                 # Contexto actual.docx original
+│
+├── 📂 Herramientas_Docker_Wine/               # Simulación de Windows limpio en contenedor
+│   ├── Dockerfile.wine-test                   # Definición del entorno reproducible
+│   ├── run_simulation.sh                     # Runner de pruebas automatizadas
+│   ├── Simular_en_Docker.bat                  # Lanzador Windows (1 clic)
+│   └── Simular_en_Docker.sh                   # Lanzador Linux / WSL
+│
+│   ─── SOLO ARCHIVOS ESENCIALES EN LA RAÍZ ───
+├── 📄 README.md                               # Guía principal del proyecto y catálogo
+├── 📄 AGENTS.md                               # Contexto técnico para desarrolladores e IA
+├── ⚡ Lanzar_HMI_Rover.bat                     # Lanzador inteligente en Windows (1 clic)
+├── 🔨 Compilar_HMI_a_EXE.bat                  # Compilador de 1 clic a HMI_Rover_Lunar_V2.exe
+├── 🚀 Subir_Cambios.bat                       # Sincronizador rápido con GitHub
+└── ⚙️ .gitignore                              # Exclusiones de Git
 ```
 
 ---

@@ -44,6 +44,6 @@ if errorlevel 1 (
 )
 
 echo [OK] Iniciando HMI_Rover_Debug.py...
-cd /d "%~dp0Firmware_y_Control\Interfaz"
+cd /d "%~dp0HMI_Debug"
 start "" %PY_CMD% HMI_Rover_Debug.py
 exit /b 0

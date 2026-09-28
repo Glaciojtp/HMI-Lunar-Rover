@@ -71,12 +71,12 @@ A continuación se detalla cada código fuente del proyecto, su ubicación exact
 
 | Archivo `.ino` | Carpeta en el Repositorio | Microcontrolador Previsto (Última Versión) | Rol en el Sistema |
 |---|---|---|---|
-| **`Ejecutor_ArduinoNano_ESP32.ino`** | [`Firmware_y_Control/Ejecutor/Ejecutor_ArduinoNano_ESP32/`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/Firmware_y_Control/Ejecutor/Ejecutor_ArduinoNano_ESP32) | ⭐ **Arduino Nano ESP32** (ESP32-S3 a 3.3V) | **Receptor Oficial del Rover:** 6 motores + 4 servos independientes. |
-| **`Joystick_Arduino_Nano.ino`** | [`Firmware_y_Control/Control/Joystick_Arduino_Nano/`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/Firmware_y_Control/Control/Joystick_Arduino_Nano) | **Arduino Nano Clásico (ATmega328P)** o **Arduino Nano ESP32** | **Mando Joystick Físico Autónomo:** Control inalámbrico sin PC. |
-| **`Control_ESP32_C3_Optimizado.ino`** | [`Firmware_y_Control/Control/Control_ESP32_C3_Optimizado/`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/Firmware_y_Control/Control/Control_ESP32_C3_Optimizado) | **ESP32-C3 SuperMini** / **LOLIN C3 Mini** (RISC-V a 3.3V) | **Transmisor PC:** Puente USB Serial a Radiofrecuencia RF24. |
-| **`Control_ESP32_C3_Debug.ino`** | [`Firmware_y_Control/Control/Control_ESP32_C3_Debug/`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/Firmware_y_Control/Control/Control_ESP32_C3_Debug) | **ESP32-C3 SuperMini** / **LOLIN C3 Mini** | **Transmisor Modo Debug:** Reporte de volcado HEX y métricas de tasa. |
-| **`Ejecutor_ArduinoMKR_Optimizado.ino`** | [`Firmware_y_Control/Ejecutor/Ejecutor_ArduinoMKR_Optimizado/`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/Firmware_y_Control/Ejecutor/Ejecutor_ArduinoMKR_Optimizado) | **Arduino MKR 1310** (SAMD21 ARM Cortex-M0+ a 3.3V) | **Receptor Alternativo:** Versión previa con drenaje rápido y failsafe. |
-| **`Ejecutor_ArduinoMKR_Debug.ino`** | [`Firmware_y_Control/Ejecutor/Ejecutor_ArduinoMKR_Debug/`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/Firmware_y_Control/Ejecutor/Ejecutor_ArduinoMKR_Debug) | **Arduino MKR 1310** (SAMD21 ARM Cortex-M0+ a 3.3V) | **Receptor Modo Debug:** Validación cruzada TX/RX y telemetría de retorno. |
+| **`Ejecutor_ArduinoNano_ESP32.ino`** | [`01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32/`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32) | ⭐ **Arduino Nano ESP32** (ESP32-S3 a 3.3V) | **Receptor Oficial del Rover:** 6 motores + 4 servos independientes. |
+| **`Joystick_Arduino_Nano.ino`** | [`01_Oficial/Mando_Joystick_Fisico/Joystick_Arduino_Nano/`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/01_Oficial/Mando_Joystick_Fisico/Joystick_Arduino_Nano) | **Arduino Nano Clásico (ATmega328P)** o **Arduino Nano ESP32** | **Mando Joystick Físico Autónomo:** Control inalámbrico sin PC. |
+| **`Control_ESP32_C3_Optimizado.ino`** | [`01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado/`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado) | **ESP32-C3 SuperMini** / **LOLIN C3 Mini** (RISC-V a 3.3V) | **Transmisor PC:** Puente USB Serial a Radiofrecuencia RF24. |
+| **`Control_ESP32_C3_Debug.ino`** | [`02_Debug_y_Pruebas/Firmware_Debug/Control_ESP32_C3_Debug/`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/02_Debug_y_Pruebas/Firmware_Debug/Control_ESP32_C3_Debug) | **ESP32-C3 SuperMini** / **LOLIN C3 Mini** | **Transmisor Modo Debug:** Reporte de volcado HEX y métricas de tasa. |
+| **`Ejecutor_ArduinoMKR_Optimizado.ino`** | [`01_Oficial/Receptor_Rover_MKR1310/Ejecutor_ArduinoMKR_Optimizado/`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/01_Oficial/Receptor_Rover_MKR1310/Ejecutor_ArduinoMKR_Optimizado) | **Arduino MKR 1310** (SAMD21 ARM Cortex-M0+ a 3.3V) | **Receptor Alternativo:** Versión previa con drenaje rápido y failsafe. |
+| **`Ejecutor_ArduinoMKR_Debug.ino`** | [`02_Debug_y_Pruebas/Firmware_Debug/Ejecutor_ArduinoMKR_Debug/`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/02_Debug_y_Pruebas/Firmware_Debug/Ejecutor_ArduinoMKR_Debug) | **Arduino MKR 1310** (SAMD21 ARM Cortex-M0+ a 3.3V) | **Receptor Modo Debug:** Validación cruzada TX/RX y telemetría de retorno. |
 
 ---
 
@@ -92,19 +92,19 @@ A continuación se detalla cada código fuente del proyecto, su ubicación exact
 ---
 
 ### 1. Flashear el Receptor Oficial del Rover: `Ejecutor_ArduinoNano_ESP32.ino`
-* **Ubicación:** `Firmware_y_Control/Ejecutor/Ejecutor_ArduinoNano_ESP32/Ejecutor_ArduinoNano_ESP32.ino`
+* **Ubicación:** `01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32/Ejecutor_ArduinoNano_ESP32.ino`
 * **Microcontrolador:** **Arduino Nano ESP32**
 1. En Arduino IDE, andá a **Boards Manager** (`Ctrl + Shift + B`) e instalá el paquete **`Arduino ESP32 Boards`**.
 2. Seleccioná la placa: **`Arduino Nano ESP32`**.
 3. En *Pin Numbering*, dejá la opción predeterminada: **`By Arduino pin (default)`**.
 4. Conectá el cable USB-C al Arduino Nano ESP32 y seleccioná el puerto COM asignado.
 5. Hacé clic en **Subir (Upload)**.
-> *Esquemático completo de conexiones:* Ver [ESQUEMATICO_NANO_ESP32.md](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/ESQUEMATICO_NANO_ESP32.md).
+> *Esquemático completo de conexiones:* Ver [03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md).
 
 ---
 
 ### 2. Flashear el Mando Joystick Autónomo: `Joystick_Arduino_Nano.ino`
-* **Ubicación:** `Firmware_y_Control/Control/Joystick_Arduino_Nano/Joystick_Arduino_Nano.ino`
+* **Ubicación:** `01_Oficial/Mando_Joystick_Fisico/Joystick_Arduino_Nano/Joystick_Arduino_Nano.ino`
 * **Microcontrolador:** **Arduino Nano Clásico (ATmega328P)** o **Arduino Nano ESP32**
 1. Si usás el Arduino Nano clásico azul:
    * Seleccioná la placa: **`Arduino Nano`**.
@@ -113,12 +113,12 @@ A continuación se detalla cada código fuente del proyecto, su ubicación exact
    * Seleccioná la placa: **`Arduino Nano ESP32`**.
 3. Verificá que la librería `RF24` esté instalada.
 4. Conectá el cable USB, seleccioná el puerto COM y hacé clic en **Subir**.
-> *Guía de armado de hardware y cableado:* Ver [GUIA_JOYSTICK_HARDWARE.md](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/GUIA_JOYSTICK_HARDWARE.md).
+> *Guía de armado de hardware y cableado:* Ver [03_Documentacion_y_Guias/Guias/GUIA_JOYSTICK_HARDWARE.md](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/03_Documentacion_y_Guias/Guias/GUIA_JOYSTICK_HARDWARE.md).
 
 ---
 
 ### 3. Flashear el Módulo Transmisor PC: `Control_ESP32_C3_Optimizado.ino`
-* **Ubicación:** `Firmware_y_Control/Control/Control_ESP32_C3_Optimizado/Control_ESP32_C3_Optimizado.ino`
+* **Ubicación:** `01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado/Control_ESP32_C3_Optimizado.ino`
 * **Microcontrolador:** **ESP32-C3 SuperMini** / **LOLIN C3 Mini**
 1. En **Boards Manager**, instalá el paquete **`esp32`** de *Espressif Systems*.
 2. Seleccioná la placa: **`ESP32C3 Dev Module`** o **`LOLIN C3 Mini`**.
@@ -130,12 +130,12 @@ A continuación se detalla cada código fuente del proyecto, su ubicación exact
 ---
 
 ### 4. Flashear el Receptor Previo en Arduino MKR: `Ejecutor_ArduinoMKR_Optimizado.ino`
-* **Ubicación:** `Firmware_y_Control/Ejecutor/Ejecutor_ArduinoMKR_Optimizado/Ejecutor_ArduinoMKR_Optimizado.ino`
+* **Ubicación:** `01_Oficial/Receptor_Rover_MKR1310/Ejecutor_ArduinoMKR_Optimizado/Ejecutor_ArduinoMKR_Optimizado.ino`
 * **Microcontrolador:** **Arduino MKR 1310** (o MKR WiFi 1010)
 1. En **Boards Manager**, instalá el paquete **`Arduino SAMD Boards (32-bits ARM Cortex-M0+)`**.
 2. Seleccioná la placa: **`Arduino MKR WAN 1310`**.
 3. Conectá el cable micro-USB, seleccioná el COM y subí el código.
-> *Esquemático completo de conexiones:* Ver [ESQUEMATICO_MKR1310.md](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/ESQUEMATICO_MKR1310.md).
+> *Esquemático completo de conexiones:* Ver [03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_MKR1310.md](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_MKR1310.md).
 
 ---
 
@@ -143,8 +143,8 @@ A continuación se detalla cada código fuente del proyecto, su ubicación exact
 
 Para operar el Rover desde la computadora, el repositorio incluye dos interfaces gráficas desarrolladas en Python con Tkinter, completamente libres de dependencias complejas y con detección inteligente de puertos COM:
 
-* **[`HMI_Rover_V2.py`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/Firmware_y_Control/Interfaz/HMI_Rover_V2.py):** Interfaz principal de pilotaje con telemetría en tiempo real, digital twin 2D, sliders de calibración independiente de potencia (trims 0% a 150%) y selector de modos (Ackermann, Cangrejo y Giro 360°).
-* **[`HMI_Rover_Debug.py`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/Firmware_y_Control/Interfaz/HMI_Rover_Debug.py):** Herramienta de diagnóstico de laboratorio con validación cruzada TX <-> RX en vivo, cálculo de latencia en milisegundos y registro de paquetes FIFO.
+* **[`HMI_Rover_V2.py`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/01_Oficial/HMI/HMI_Rover_V2.py):** Interfaz principal de pilotaje con telemetría en tiempo real, digital twin 2D, sliders de calibración independiente de potencia (trims 0% a 150%) y selector de modos (Ackermann, Cangrejo y Giro 360°).
+* **[`HMI_Rover_Debug.py`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/02_Debug_y_Pruebas/HMI_Debug/HMI_Rover_Debug.py):** Herramienta de diagnóstico de laboratorio con validación cruzada TX <-> RX en vivo, cálculo de latencia en milisegundos y registro de paquetes FIFO.
 
 ### ¿Cómo correr la HMI en Windows sin complicaciones?
 Elegí el método que prefieras:
@@ -153,7 +153,7 @@ Elegí el método que prefieras:
 2. **Lanzador Automático:**  
    Hacé doble clic en [`Lanzar_HMI_Rover.bat`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/Lanzar_HMI_Rover.bat). Si no tenés la librería `pyserial`, el script la detecta y la instala automáticamente en 2 segundos.
 
-> *Manual de usuario en 1 minuto:* Consultá [`GUIA_RAPIDA_EQUIPO.md`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/GUIA_RAPIDA_EQUIPO.md).
+> *Manual de usuario en 1 minuto:* Consultá [`03_Documentacion_y_Guias/Guias/GUIA_RAPIDA_EQUIPO.md`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/03_Documentacion_y_Guias/Guias/GUIA_RAPIDA_EQUIPO.md).
 
 ---
 
@@ -183,53 +183,55 @@ Elegí el método que prefieras:
 
 ## 📂 Estructura del Repositorio
 
+El repositorio se encuentra estrictamente organizado por módulos funcionales:
+
 ```text
-hmi_rover_cepit/
-├── README.md                                # Este documento principal de referencia y guía de uso
-├── AGENTS.md                                # Contexto técnico exhaustivo para desarrolladores e IA
-├── GUIA_RAPIDA_EQUIPO.md                    # Manual de 1 minuto para el equipo (100% Windows)
-├── ESQUEMATICO_NANO_ESP32.md                # Esquemático oficial de a bordo (Arduino Nano ESP32)
-├── ESQUEMATICO_MKR1310.md                   # Esquemático de conexiones previo (Arduino MKR 1310)
-├── GUIA_JOYSTICK_HARDWARE.md                # Esquemático y cableado del Mando Joystick físico
-├── EVALUACION_TECNICA_MICROPYTHON_ARDUINO_Q.md # Análisis de MicroPython y evaluación de Arduino UNO Q
-├── Compilar_HMI_a_EXE.bat                   # Compilador de 1 clic a ejecutable HMI_Rover_Lunar_V2.exe
-├── Lanzar_HMI_Rover.bat                     # Lanzador Windows inteligente con auto-instalación
-├── Lanzar_HMI_Debug.bat                     # Lanzador Windows modo depuración y diagnóstico
-├── Subir_Cambios.bat                        # Sincronizador de 1 clic con GitHub
-├── WindowsFormsApp4/                        # Interfaz gráfica de telemetría previa en C# (.NET)
-├── WindowsFormsApp4.slnx                    # Solución de Visual Studio
-└── Firmware_y_Control/                      # Firmware de microcontroladores y software HMI
-    ├── Contexto actual.docx                 # Documento técnico original del equipo
-    ├── Codigo_MKR_28-8/                     # Código de referencia preliminar para MKR
-    ├── Control/                             # Firmwares para el Mando y Módulo Transmisor
-    │   ├── Joystick_Arduino_Nano/           # Firmware Mando Joystick físico autónomo (Nano / Nano ESP32)
-    │   ├── Control_ESP32_C3_Optimizado/     # Firmware Transmisor PC optimizado (ESP32-C3)
-    │   ├── Control_ESP32_C3_Debug/          # Firmware Transmisor PC modo DEBUG con volcado HEX
-    │   ├── Control_LOLIN-C3-MINI/           # Firmware base para placa LOLIN C3 Mini
-    │   ├── Control_LOLIN-C3-MINI-v0.2/
-    │   └── Control_LOLIN_C3_MINI-v0.1/
-    ├── Ejecutor/                            # Firmwares para el módulo Receptor del Rover
-    │   ├── Ejecutor_ArduinoNano_ESP32/      # Firmware oficial del Rover (Arduino Nano ESP32 6x6 + 4WS)
-    │   ├── Ejecutor_ArduinoMKR_Optimizado/  # Firmware receptor optimizado para Arduino MKR 1310
-    │   ├── Ejecutor_ArduinoMKR_Debug/       # Firmware receptor modo DEBUG con reporte FIFO y watchdog
-    │   ├── Ejecutor_ArduinoMKR/             # Firmware base para MKR
-    │   └── Ejecutor_ArduinoMKR-v0.1/
-    ├── Interfaz/                            # Software HMI de Estación Terrena en Python
-    │   ├── HMI_Rover_V2.py                  # Interfaz principal de control y visualización 2D
-    │   ├── HMI_Rover_Debug.py               # Herramienta de depuración y validación cruzada TX/RX
-    │   ├── Interfaz-Rover-29-8-v2.py
-    │   ├── Interfaz-Rover-29-8-v3.py
-    │   └── Interfaz-Rover_29-8.py
-    └── Test_RF/                             # Pruebas unitarias de radiofrecuencia NRF24L01
-        ├── Test_RF_Transmisor_ESP32/
-        └── Test_RF_Receptor_MKR/
+HMI-Lunar-Rover/
+│
+├── 📂 01_Oficial/                             # Firmwares e interfaz en producción
+│   ├── HMI/                                   # HMI_Rover_V2.py (GUI principal de pilotaje)
+│   ├── Receptor_Rover_NanoESP32/              # Ejecutor_ArduinoNano_ESP32.ino (Receptor Oficial)
+│   ├── Receptor_Rover_MKR1310/                # Ejecutor_ArduinoMKR_Optimizado.ino (Receptor previo)
+│   ├── Transmisor_PC_ESP32C3/                 # Control_ESP32_C3_Optimizado.ino (Puente USB-RF)
+│   └── Mando_Joystick_Fisico/                 # Joystick_Arduino_Nano.ino (Mando RC autónomo)
+│
+├── 📂 02_Debug_y_Pruebas/                     # Herramientas de depuración y laboratorio
+│   ├── HMI_Debug/                             # HMI_Rover_Debug.py (Telemetría y validación)
+│   ├── Firmware_Debug/                        # Firmwares con volcado HEX y logs FIFO
+│   ├── Test_RF_Unitarios/                     # Sketches de prueba de radiofrecuencia NRF24L01
+│   └── Lanzar_HMI_Debug.bat                   # Acceso directo al modo diagnóstico
+│
+├── 📂 03_Documentacion_y_Guias/               # Manuales y planos de conexionado
+│   ├── Guias/                                 # GUIA_RAPIDA_EQUIPO, GUIA_JOYSTICK_HARDWARE, etc.
+│   └── Esquematicos/                          # ESQUEMATICO_NANO_ESP32 y ESQUEMATICO_MKR1310
+│
+├── 📂 04_Legado_y_Versiones_Previas/          # Archivos históricos o de grupos anteriores
+│   ├── WindowsFormsApp4/                      # Interfaz en C# / .NET del grupo anterior
+│   ├── WindowsFormsApp4.slnx
+│   ├── Firmwares_Historicos/                  # Códigos de referencia v0.1, v0.2, LOLIN, etc.
+│   ├── Interfaces_Historicas/                 # Scripts Python preliminares
+│   └── Documentos_Originales/                 # Contexto actual.docx original
+│
+├── 📂 Herramientas_Docker_Wine/               # Simulación de Windows limpio en contenedor
+│   ├── Dockerfile.wine-test                   # Definición del entorno reproducible
+│   ├── run_simulation.sh                     # Runner de pruebas automatizadas
+│   ├── Simular_en_Docker.bat                  # Lanzador Windows (1 clic)
+│   └── Simular_en_Docker.sh                   # Lanzador Linux / WSL
+│
+│   ─── SOLO ARCHIVOS ESENCIALES EN LA RAÍZ ───
+├── 📄 README.md                               # Guía principal del proyecto y catálogo
+├── 📄 AGENTS.md                               # Contexto técnico para desarrolladores e IA
+├── ⚡ Lanzar_HMI_Rover.bat                     # Lanzador inteligente en Windows (1 clic)
+├── 🔨 Compilar_HMI_a_EXE.bat                  # Compilador de 1 clic a HMI_Rover_Lunar_V2.exe
+├── 🚀 Subir_Cambios.bat                       # Sincronizador rápido con GitHub
+└── ⚙️ .gitignore                              # Exclusiones de Git
 ```
 
 ---
 
 ## 📚 Documentación Técnica Detallada
 
-* Para profundizar en los detalles de conexionado pin a pin y pines libres del receptor: [`ESQUEMATICO_NANO_ESP32.md`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/ESQUEMATICO_NANO_ESP32.md).
-* Para armar el mando físico con joysticks y potenciómetro: [`GUIA_JOYSTICK_HARDWARE.md`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/GUIA_JOYSTICK_HARDWARE.md).
+* Para profundizar en los detalles de conexionado pin a pin y pines libres del receptor: [`03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md).
+* Para armar el mando físico con joysticks y potenciómetro: [`03_Documentacion_y_Guias/Guias/GUIA_JOYSTICK_HARDWARE.md`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/03_Documentacion_y_Guias/Guias/GUIA_JOYSTICK_HARDWARE.md).
 * Para conocer las directrices completas de desarrollo y arquitectura de software: [`AGENTS.md`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/AGENTS.md).
-* Para evaluar el análisis de MicroPython y la futura plataforma Arduino UNO Q: [`EVALUACION_TECNICA_MICROPYTHON_ARDUINO_Q.md`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/EVALUACION_TECNICA_MICROPYTHON_ARDUINO_Q.md).
+* Para evaluar el análisis de MicroPython y la futura plataforma Arduino UNO Q: [`03_Documentacion_y_Guias/Guias/EVALUACION_TECNICA_MICROPYTHON_ARDUINO_Q.md`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/03_Documentacion_y_Guias/Guias/EVALUACION_TECNICA_MICROPYTHON_ARDUINO_Q.md).

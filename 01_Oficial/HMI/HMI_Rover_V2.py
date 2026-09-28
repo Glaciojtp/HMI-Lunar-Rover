@@ -1104,7 +1104,12 @@ class HMIRoverRockerBogie:
                 return
             except Exception:
                 pass
-        print(linea)
+        try:
+            if sys.stdout is not None and hasattr(sys.stdout, 'write'):
+                sys.stdout.write(linea + "\n")
+                sys.stdout.flush()
+        except Exception:
+            pass
         if hasattr(self, '_log_buffer'):
             self._log_buffer.append(linea)
 
@@ -1351,7 +1356,36 @@ class HMIRoverRockerBogie:
         self.root.after(100, self.actualizar_telemetria_ui)
 
 
+def configurar_captura_errores():
+    import traceback
+    import os
+
+    def manejador_excepciones(tipo, valor, tb):
+        err_msg = "".join(traceback.format_exception(tipo, valor, tb))
+        base_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
+        log_path = os.path.join(base_dir, "hmi_crash_log.txt")
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(f"\n{'='*60}\nREPORTE DE ERROR (CRASH) - {time.strftime('%Y-%m-%d %H:%M:%S')}\n{'='*60}\n{err_msg}\n")
+        except Exception:
+            pass
+        try:
+            messagebox.showerror(
+                "Error Inesperado - HMI Rover Lunar V2.0",
+                f"Se produjo un fallo al ejecutar la aplicación:\n\n{valor}\n\n"
+                f"Detalles técnicos guardados en:\n{log_path}"
+            )
+        except Exception:
+            pass
+
+    sys.excepthook = manejador_excepciones
+
+
 if __name__ == "__main__":
-    ventana_principal = tk.Tk()
-    app = HMIRoverRockerBogie(ventana_principal)
-    ventana_principal.mainloop()
+    configurar_captura_errores()
+    try:
+        ventana_principal = tk.Tk()
+        app = HMIRoverRockerBogie(ventana_principal)
+        ventana_principal.mainloop()
+    except Exception as e:
+        sys.excepthook(*sys.exc_info())

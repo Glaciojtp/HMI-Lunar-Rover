@@ -1,0 +1,27 @@
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV WINEDEBUG=-all,err+all,fixme-all
+
+RUN dpkg --add-architecture i386 && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        wine \
+        wine64 \
+        wine32:i386 \
+        xvfb \
+        x11-utils \
+        ca-certificates \
+        procps && \
+    rm -rf /var/lib/apt/lists/*
+
+# Inicializar prefijo limpio sin descargar mono/gecko interactivos
+ENV WINEDLLOVERRIDES="mscoree,mshtml="
+RUN xvfb-run -a wineboot --init && wineserver -w
+
+WORKDIR /workspace
+
+COPY run_simulation.sh /usr/local/bin/run_simulation.sh
+RUN chmod +x /usr/local/bin/run_simulation.sh
+
+ENTRYPOINT ["/usr/local/bin/run_simulation.sh"]
