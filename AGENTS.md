@@ -113,7 +113,7 @@ Alternativa oficial al MKR 1310. Trabaja a **3.3V nativo** (ESP32-S3) con PWM po
 | **Servomotor S4** | Señal | **Pin A0** | Dirección Rueda Trasera Derecha |
 | **Regulador Step-Down**| Salida 5V-6V | VCC Servos | Alimentación aislada para S1, S2, S3 y S4 (GND común) |
 
-*Consulte [ESQUEMATICO_NANO_ESP32.md](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/ESQUEMATICO_NANO_ESP32.md) para el pinout completo y los pines libres de expansión.*
+*Consulte [ESQUEMATICO_NANO_ESP32.md](ESQUEMATICO_NANO_ESP32.md) para el pinout completo y los pines libres de expansión.*
 
 ---
 
@@ -176,7 +176,7 @@ HMI-Lunar-Rover/
 │   ├── Guias/                                 # GUIA_RAPIDA_EQUIPO, GUIA_JOYSTICK_HARDWARE, etc.
 │   └── Esquematicos/                          # ESQUEMATICO_NANO_ESP32 y ESQUEMATICO_MKR1310
 │
-├── 📂 04_Legado_y_Versiones_Previas/          # Archivos históricos o de grupos anteriores
+├── 📂 04_Legacy_y_Versiones_Previas/          # Archivos históricos o de grupos anteriores
 │   ├── WindowsFormsApp4/                      # Interfaz en C# / .NET del grupo anterior
 │   ├── WindowsFormsApp4.slnx
 │   ├── Firmwares_Historicos/                  # Códigos de referencia v0.1, v0.2, LOLIN, etc.

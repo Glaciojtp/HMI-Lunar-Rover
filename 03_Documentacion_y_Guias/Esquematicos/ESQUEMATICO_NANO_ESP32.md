@@ -200,6 +200,6 @@ graph TD
 ---
 
 ## 6. Reglas de Seguridad en el Código y Pruebas
-1. **Límites angulares en software:** El firmware en [`Ejecutor_ArduinoNano_ESP32.ino`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/Firmware_y_Control/Ejecutor/Ejecutor_ArduinoNano_ESP32/Ejecutor_ArduinoNano_ESP32.ino) aplica automáticamente `constrain(angulo, 10, 170)` para no forzar los engranajes plásticos de los servos.
+1. **Límites angulares en software:** El firmware en [`Ejecutor_ArduinoNano_ESP32.ino`](Ejecutor/Ejecutor_ArduinoNano_ESP32/Ejecutor_ArduinoNano_ESP32.ino) aplica automáticamente `constrain(angulo, 10, 170)` para no forzar los engranajes plásticos de los servos.
 2. **Watchdog de seguridad:** Si se interrumpe la señal de radio por más de 1 segundo (1000 ms), el rover frena sus 6 motores a 0 de forma preventiva.
 3. **Masa común obligatoria:** La tierra (GND) del regulador Step-Down, de la batería LiPo, del puente H y del Arduino Nano ESP32 deben estar físicamente unidas para garantizar referencias de voltaje correctas.

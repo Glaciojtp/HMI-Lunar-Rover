@@ -11,11 +11,11 @@ Elegí la opción que te resulte más cómoda:
 
 ### Opción A (Recomendada: Cero instalaciones ni configuración)
 1. Si en la carpeta principal tenés el archivo **`HMI_Rover_Lunar_V2.exe`**, simplemente hacé **doble clic sobre él**.
-   * *Si todavía no está generado:* Hacé doble clic en [`Compilar_HMI_a_EXE.bat`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/Compilar_HMI_a_EXE.bat). Esperás 30 segundos y te crea el `.exe` para siempre.
+   * *Si todavía no está generado:* Hacé doble clic en [`Compilar_HMI_a_EXE.bat`](Compilar_HMI_a_EXE.bat). Esperás 30 segundos y te crea el `.exe` para siempre.
 2. ¡Listo! Se abre la ventana gráfica nativa de Windows. No necesitás instalar Python, ni librerías, ni Docker.
 
 ### Opción B (Desde el lanzador automático con Python)
-1. Hacé doble clic en [`Lanzar_HMI_Rover.bat`](file:///mnt/c/Users/joaqu/Downloads/hmi_rover_cepit/Lanzar_HMI_Rover.bat).
+1. Hacé doble clic en [`Lanzar_HMI_Rover.bat`](Lanzar_HMI_Rover.bat).
 2. El script detecta si te falta alguna librería (como `pyserial`) y **la instala automáticamente en 2 segundos** sin que tengas que abrir consolas ni tocar nada.
 
 ---
