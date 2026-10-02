@@ -7,3 +7,4 @@ pub mod app;
 pub mod kinematics;
 pub mod profiles;
 pub mod serial_worker;
+pub mod simulation;

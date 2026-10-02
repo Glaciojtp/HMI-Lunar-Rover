@@ -22,6 +22,7 @@ use crate::kinematics::{
 };
 use crate::profiles::{DiscoveredPort, HandshakeInfo, HardwareProfileRegistry, PERFIL_DEFAULT_ID};
 use crate::serial_worker::{SerialEvent, SerialWorkerHandle};
+use crate::simulation::SimuladorPlano;
 
 /// Entrada de registro en la consola de telemetria.
 #[derive(Debug, Clone)]
@@ -60,8 +61,13 @@ pub struct RoverApp {
     trims: TrimsMotores,
     servos_manuales: AngulosServos,
     invertir_servos: bool,
+    servos_360: bool,
     modo_binario: bool,
     transmision_continua: bool,
+
+    // Simulador 2D en plano
+    simulador: SimuladorPlano,
+    vista_simulacion: bool,
 
     // Estado calculado actual
     estado_chasis: EstadoChasis,
@@ -98,8 +104,12 @@ impl Default for RoverApp {
             trims: TrimsMotores::default(),
             servos_manuales: AngulosServos::default(),
             invertir_servos: false,
+            servos_360: false,
             modo_binario: false,
             transmision_continua: true,
+
+            simulador: SimuladorPlano::new(),
+            vista_simulacion: false,
 
             estado_chasis: EstadoChasis {
                 traccion_izq: 0,
@@ -222,6 +232,7 @@ impl RoverApp {
             &self.trims,
             &self.servos_manuales,
             self.invertir_servos,
+            self.servos_360,
         );
         self.agregar_log(
             "[STOP]",
@@ -350,6 +361,7 @@ impl RoverApp {
             &self.trims,
             &self.servos_manuales,
             self.invertir_servos,
+            self.servos_360,
         );
 
         // Si hay una orden de direccion por teclado en un modo coordinado (Ackermann/PointTurn/Crab),
@@ -388,11 +400,10 @@ impl eframe::App for RoverApp {
         self.procesar_eventos_serial();
         self.procesar_teclado(ctx);
         self.procesar_transmision_periodica();
+        self.simulador.tick(&self.estado_chasis, None);
 
-        // Solicitar repintado continuo mientras este conectado para tasa 20 Hz
-        if self.conectado {
-            ctx.request_repaint_after(Duration::from_millis(40));
-        }
+        // Solicitar repintado continuo a ~30 FPS para visualizacion y simulacion dinamica
+        ctx.request_repaint_after(Duration::from_millis(30));
 
         // =====================================================================
         // 1. BARRA SUPERIOR: CONEXION, IDENT Y ESTADO GENERAL
@@ -527,7 +538,7 @@ impl eframe::App for RoverApp {
                 if self.modo != modo_previo {
                     match self.modo {
                         ModoConduccion::PointTurn => self.servos_manuales.preset_point_turn(),
-                        ModoConduccion::Crab => self.servos_manuales.preset_crab(),
+                        ModoConduccion::Crab => self.servos_manuales.preset_crab(self.servos_360),
                         ModoConduccion::Ackermann => self.servos_manuales.centrar(),
                         ModoConduccion::Manual => {}
                     }
@@ -537,6 +548,7 @@ impl eframe::App for RoverApp {
                         &self.trims,
                         &self.servos_manuales,
                         self.invertir_servos,
+                        self.servos_360,
                     );
                 }
 
@@ -640,54 +652,130 @@ impl eframe::App for RoverApp {
 
                     // TARJETA 2: DIRECCION INDEPENDIENTE (4 SERVOMOTORES)
                     egui::Frame::group(ui.style()).show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new("DIRECCION INDEPENDIENTE (SERVOS S1..S4)")
-                                .strong()
-                                .color(Color32::from_rgb(0, 245, 212)),
-                        );
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("DIRECCION INDEPENDIENTE (SERVOS S1..S4)")
+                                    .strong()
+                                    .color(Color32::from_rgb(0, 245, 212)),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.checkbox(&mut self.servos_360, "Servos 360 deg (Continuo)").changed() {
+                                    if !self.servos_360 {
+                                        self.servos_manuales.s1 = self.servos_manuales.s1.clamp(10, 170);
+                                        self.servos_manuales.s2 = self.servos_manuales.s2.clamp(10, 170);
+                                        self.servos_manuales.s3 = self.servos_manuales.s3.clamp(10, 170);
+                                        self.servos_manuales.s4 = self.servos_manuales.s4.clamp(10, 170);
+                                    }
+                                    self.estado_chasis = calcular_cinematica(
+                                        &self.teclas,
+                                        self.modo,
+                                        &self.trims,
+                                        &self.servos_manuales,
+                                        self.invertir_servos,
+                                        self.servos_360,
+                                    );
+                                }
+                            });
+                        });
 
                         ui.separator();
 
+                        let (min_s, max_s) = if self.servos_360 {
+                            (0u16, 360u16)
+                        } else {
+                            (10u16, 170u16)
+                        };
+
+                        let mut cambio_slider = false;
                         ui.columns(2, |subcols| {
                             subcols[0].vertical(|ui| {
                                 ui.label("TREN DELANTERO");
-                                ui.add(
-                                    egui::Slider::new(&mut self.servos_manuales.s1, 10..=170)
+                                cambio_slider |= ui.add(
+                                    egui::Slider::new(&mut self.servos_manuales.s1, min_s..=max_s)
                                         .text("S1: Del. Izq (deg)"),
-                                );
-                                ui.add(
-                                    egui::Slider::new(&mut self.servos_manuales.s2, 10..=170)
+                                ).changed();
+                                cambio_slider |= ui.add(
+                                    egui::Slider::new(&mut self.servos_manuales.s2, min_s..=max_s)
                                         .text("S2: Del. Der (deg)"),
-                                );
+                                ).changed();
                             });
 
                             subcols[1].vertical(|ui| {
                                 ui.label("TREN TRASERO");
-                                ui.add(
-                                    egui::Slider::new(&mut self.servos_manuales.s3, 10..=170)
+                                cambio_slider |= ui.add(
+                                    egui::Slider::new(&mut self.servos_manuales.s3, min_s..=max_s)
                                         .text("S3: Tras. Izq (deg)"),
-                                );
-                                ui.add(
-                                    egui::Slider::new(&mut self.servos_manuales.s4, 10..=170)
+                                ).changed();
+                                cambio_slider |= ui.add(
+                                    egui::Slider::new(&mut self.servos_manuales.s4, min_s..=max_s)
                                         .text("S4: Tras. Der (deg)"),
-                                );
+                                ).changed();
                             });
                         });
+
+                        if cambio_slider {
+                            self.servos_manuales = self.servos_manuales.asegurar_limites(self.servos_360);
+                            self.estado_chasis = calcular_cinematica(
+                                &self.teclas,
+                                self.modo,
+                                &self.trims,
+                                &self.servos_manuales,
+                                self.invertir_servos,
+                                self.servos_360,
+                            );
+                        }
 
                         ui.add_space(4.0);
 
                         ui.horizontal_wrapped(|ui| {
                             if ui.button("[Centrar Servos (90 deg)]").clicked() {
                                 self.servos_manuales.centrar();
+                                self.estado_chasis = calcular_cinematica(
+                                    &self.teclas,
+                                    self.modo,
+                                    &self.trims,
+                                    &self.servos_manuales,
+                                    self.invertir_servos,
+                                    self.servos_360,
+                                );
                             }
                             if ui.button("[Preset Giro Sobre Eje]").clicked() {
                                 self.servos_manuales.preset_point_turn();
+                                self.estado_chasis = calcular_cinematica(
+                                    &self.teclas,
+                                    self.modo,
+                                    &self.trims,
+                                    &self.servos_manuales,
+                                    self.invertir_servos,
+                                    self.servos_360,
+                                );
                             }
-                            if ui.button("[Preset Cangrejo (45 deg)]").clicked() {
-                                self.servos_manuales.preset_crab();
+                            let crab_btn_texto = if self.servos_360 {
+                                "[Preset Cangrejo (180 deg / Lateral)]"
+                            } else {
+                                "[Preset Cangrejo (45 deg)]"
+                            };
+                            if ui.button(crab_btn_texto).clicked() {
+                                self.servos_manuales.preset_crab(self.servos_360);
+                                self.estado_chasis = calcular_cinematica(
+                                    &self.teclas,
+                                    self.modo,
+                                    &self.trims,
+                                    &self.servos_manuales,
+                                    self.invertir_servos,
+                                    self.servos_360,
+                                );
                             }
                             if ui.checkbox(&mut self.invertir_servos, "Invertir Servos").changed() {
-                                self.servos_manuales.invertir();
+                                self.servos_manuales.invertir(self.servos_360);
+                                self.estado_chasis = calcular_cinematica(
+                                    &self.teclas,
+                                    self.modo,
+                                    &self.trims,
+                                    &self.servos_manuales,
+                                    self.invertir_servos,
+                                    self.servos_360,
+                                );
                             }
                             if ui
                                 .checkbox(&mut self.modo_binario, "Modo Binario Estricto (6B)")
@@ -733,84 +821,224 @@ impl eframe::App for RoverApp {
                 // COLUMNA DERECHA: ESQUEMA 2D Y CONSOLA DE TELEMETRIA
                 // -------------------------------------------------------------
                 columns[1].vertical(|ui| {
-                    // TARJETA 3: ESQUEMA 2D DEL CHASSIS ROCKER-BOGIE
+                    // TARJETA 3: ESQUEMA 2D O SIMULADOR CINEMATICO EN PLANO
                     egui::Frame::group(ui.style()).show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new("ESQUEMA 2D EN TIEMPO REAL (CANVAS ROCKER-BOGIE)")
-                                .strong()
-                                .color(Color32::from_rgb(0, 245, 212)),
-                        );
+                        ui.horizontal(|ui| {
+                            let titulo = if self.vista_simulacion {
+                                "SIMULADOR CINEMATICO 2D (ENTORNO PLANO)"
+                            } else {
+                                "ESQUEMA 2D EN TIEMPO REAL (CANVAS ROCKER-BOGIE)"
+                            };
+                            ui.label(
+                                egui::RichText::new(titulo)
+                                    .strong()
+                                    .color(Color32::from_rgb(0, 245, 212)),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.selectable_label(self.vista_simulacion, "[Simulador]").clicked() {
+                                    self.vista_simulacion = true;
+                                }
+                                if ui.selectable_label(!self.vista_simulacion, "[Chasis]").clicked() {
+                                    self.vista_simulacion = false;
+                                }
+                            });
+                        });
                         ui.separator();
 
-                        // Canvas 2D
                         let canvas_size = Vec2::new(320.0, 240.0);
                         let (response, painter) = ui.allocate_painter(canvas_size, egui::Sense::hover());
                         let rect = response.rect;
 
-                        // Fondo del canvas
-                        painter.rect_filled(rect, Rounding::same(6.0f32), Color32::from_rgb(22, 24, 34));
-                        painter.rect_stroke(
-                            rect,
-                            Rounding::same(6.0f32),
-                            Stroke::new(1.0f32, Color32::from_rgb(51, 65, 85)),
-                        );
+                        if !self.vista_simulacion {
+                            // Fondo del canvas de chasis
+                            painter.rect_filled(rect, Rounding::same(6.0f32), Color32::from_rgb(22, 24, 34));
+                            painter.rect_stroke(
+                                rect,
+                                Rounding::same(6.0f32),
+                                Stroke::new(1.0f32, Color32::from_rgb(51, 65, 85)),
+                            );
 
-                        let center = rect.center();
+                            let center = rect.center();
 
-                        // Dibujar cuerpo central del Rover
-                        let body_rect = Rect::from_center_size(center, Vec2::new(56.0f32, 110.0f32));
-                        painter.rect_filled(
-                            body_rect,
-                            Rounding::same(4.0f32),
-                            Color32::from_rgb(33, 36, 51),
-                        );
-                        painter.rect_stroke(
-                            body_rect,
-                            Rounding::same(4.0f32),
-                            Stroke::new(1.5f32, Color32::from_rgb(0, 245, 212)),
-                        );
+                            // Dibujar cuerpo central del Rover
+                            let body_rect = Rect::from_center_size(center, Vec2::new(56.0f32, 110.0f32));
+                            painter.rect_filled(
+                                body_rect,
+                                Rounding::same(4.0f32),
+                                Color32::from_rgb(33, 36, 51),
+                            );
+                            painter.rect_stroke(
+                                body_rect,
+                                Rounding::same(4.0f32),
+                                Stroke::new(1.5f32, Color32::from_rgb(0, 245, 212)),
+                            );
 
-                        // Linea longitudinal de simetria y diferencial mecanico
-                        painter.line_segment(
-                            [
-                                Pos2::new(center.x, body_rect.top() + 6.0f32),
-                                Pos2::new(center.x, body_rect.bottom() - 6.0f32),
-                            ],
-                            Stroke::new(1.0f32, Color32::from_rgb(71, 85, 105)),
-                        );
+                            // Linea longitudinal de simetria y diferencial mecanico
+                            painter.line_segment(
+                                [
+                                    Pos2::new(center.x, body_rect.top() + 6.0f32),
+                                    Pos2::new(center.x, body_rect.bottom() - 6.0f32),
+                                ],
+                                Stroke::new(1.0f32, Color32::from_rgb(71, 85, 105)),
+                            );
 
-                        // Coordenadas relativas de las 6 ruedas
-                        let dx = 58.0f32;
-                        let dy_front = 54.0f32;
-                        let dy_mid = 0.0f32;
-                        let dy_rear = 54.0f32;
+                            // Coordenadas relativas de las 6 ruedas
+                            let dx = 58.0f32;
+                            let dy_front = 54.0f32;
+                            let dy_mid = 0.0f32;
+                            let dy_rear = 54.0f32;
 
-                        let pos_m1 = Pos2::new(center.x - dx, center.y - dy_front); // FL
-                        let pos_m2 = Pos2::new(center.x - dx, center.y - dy_mid);   // ML
-                        let pos_m3 = Pos2::new(center.x - dx, center.y + dy_rear);  // RL
-                        let pos_m4 = Pos2::new(center.x + dx, center.y - dy_front); // FR
-                        let pos_m5 = Pos2::new(center.x + dx, center.y - dy_mid);   // MR
-                        let pos_m6 = Pos2::new(center.x + dx, center.y + dy_rear);  // RR
+                            let pos_m1 = Pos2::new(center.x - dx, center.y - dy_front); // FL
+                            let pos_m2 = Pos2::new(center.x - dx, center.y - dy_mid);   // ML
+                            let pos_m3 = Pos2::new(center.x - dx, center.y + dy_rear);  // RL
+                            let pos_m4 = Pos2::new(center.x + dx, center.y - dy_front); // FR
+                            let pos_m5 = Pos2::new(center.x + dx, center.y - dy_mid);   // MR
+                            let pos_m6 = Pos2::new(center.x + dx, center.y + dy_rear);  // RR
 
-                        // Brazos de suspension Rocker-Bogie (enlaces mecanicos)
-                        let stroke_arm = Stroke::new(2.0f32, Color32::from_rgb(100, 116, 139));
-                        painter.line_segment([pos_m1, pos_m2], stroke_arm);
-                        painter.line_segment([pos_m2, pos_m3], stroke_arm);
-                        painter.line_segment([pos_m4, pos_m5], stroke_arm);
-                        painter.line_segment([pos_m5, pos_m6], stroke_arm);
-                        painter.line_segment([Pos2::new(center.x - 28.0f32, center.y), pos_m2], stroke_arm);
-                        painter.line_segment([Pos2::new(center.x + 28.0f32, center.y), pos_m5], stroke_arm);
+                            // Brazos de suspension Rocker-Bogie (enlaces mecanicos)
+                            let stroke_arm = Stroke::new(2.0f32, Color32::from_rgb(100, 116, 139));
+                            painter.line_segment([pos_m1, pos_m2], stroke_arm);
+                            painter.line_segment([pos_m2, pos_m3], stroke_arm);
+                            painter.line_segment([pos_m4, pos_m5], stroke_arm);
+                            painter.line_segment([pos_m5, pos_m6], stroke_arm);
+                            painter.line_segment([Pos2::new(center.x - 28.0f32, center.y), pos_m2], stroke_arm);
+                            painter.line_segment([Pos2::new(center.x + 28.0f32, center.y), pos_m5], stroke_arm);
 
-                        // Dibujar las 6 ruedas con orientacion y vectores
-                        let s = self.estado_chasis.servos;
-                        let pwms = self.estado_chasis.pwms_motores;
+                            // Dibujar las 6 ruedas con orientacion y vectores
+                            let s = self.estado_chasis.servos;
+                            let pwms = self.estado_chasis.pwms_motores;
 
-                        Self::dibujar_rueda(&painter, pos_m1, s.s1, pwms[0], "M1");
-                        Self::dibujar_rueda(&painter, pos_m2, 90, pwms[1], "M2");
-                        Self::dibujar_rueda(&painter, pos_m3, s.s3, pwms[2], "M3");
-                        Self::dibujar_rueda(&painter, pos_m4, s.s2, pwms[3], "M4");
-                        Self::dibujar_rueda(&painter, pos_m5, 90, pwms[4], "M5");
-                        Self::dibujar_rueda(&painter, pos_m6, s.s4, pwms[5], "M6");
+                            Self::dibujar_rueda(&painter, pos_m1, s.s1, pwms[0], "M1");
+                            Self::dibujar_rueda(&painter, pos_m2, 90, pwms[1], "M2");
+                            Self::dibujar_rueda(&painter, pos_m3, s.s3, pwms[2], "M3");
+                            Self::dibujar_rueda(&painter, pos_m4, s.s2, pwms[3], "M4");
+                            Self::dibujar_rueda(&painter, pos_m5, 90, pwms[4], "M5");
+                            Self::dibujar_rueda(&painter, pos_m6, s.s4, pwms[5], "M6");
+                        } else {
+                            // Fondo del canvas de navegacion en plano
+                            painter.rect_filled(rect, Rounding::same(6.0f32), Color32::from_rgb(15, 17, 26));
+                            painter.rect_stroke(
+                                rect,
+                                Rounding::same(6.0f32),
+                                Stroke::new(1.0f32, Color32::from_rgb(51, 65, 85)),
+                            );
+
+                            let center = rect.center();
+                            let scale = 110.0f32; // 110 px por metro
+                            let pose = self.simulador.pose;
+
+                            // Cuadricula metrica en el plano del mundo (referencia fija)
+                            let half_w_m = (rect.width() / 2.0) / scale;
+                            let half_h_m = (rect.height() / 2.0) / scale;
+
+                            let min_x_m = ((pose.x - half_w_m) * 2.0).floor() / 2.0;
+                            let max_x_m = ((pose.x + half_w_m) * 2.0).ceil() / 2.0;
+                            let min_y_m = ((pose.y - half_h_m) * 2.0).floor() / 2.0;
+                            let max_y_m = ((pose.y + half_h_m) * 2.0).ceil() / 2.0;
+
+                            let mut xm = min_x_m;
+                            while xm <= max_x_m {
+                                let screen_x = center.x + (xm - pose.x) * scale;
+                                if screen_x >= rect.left() && screen_x <= rect.right() {
+                                    let stroke_color = if xm.abs() < 0.05 {
+                                        Color32::from_rgb(71, 85, 105)
+                                    } else {
+                                        Color32::from_rgb(26, 32, 48)
+                                    };
+                                    painter.line_segment(
+                                        [Pos2::new(screen_x, rect.top()), Pos2::new(screen_x, rect.bottom())],
+                                        Stroke::new(1.0f32, stroke_color),
+                                    );
+                                }
+                                xm += 0.5;
+                            }
+
+                            let mut ym = min_y_m;
+                            while ym <= max_y_m {
+                                let screen_y = center.y - (ym - pose.y) * scale;
+                                if screen_y >= rect.top() && screen_y <= rect.bottom() {
+                                    let stroke_color = if ym.abs() < 0.05 {
+                                        Color32::from_rgb(71, 85, 105)
+                                    } else {
+                                        Color32::from_rgb(26, 32, 48)
+                                    };
+                                    painter.line_segment(
+                                        [Pos2::new(rect.left(), screen_y), Pos2::new(rect.right(), screen_y)],
+                                        Stroke::new(1.0f32, stroke_color),
+                                    );
+                                }
+                                ym += 0.5;
+                            }
+
+                            // Marcador del origen (0, 0)
+                            let origen_x = center.x + (0.0 - pose.x) * scale;
+                            let origen_y = center.y - (0.0 - pose.y) * scale;
+                            if rect.contains(Pos2::new(origen_x, origen_y)) {
+                                painter.circle_filled(Pos2::new(origen_x, origen_y), 3.0, Color32::from_rgb(255, 159, 28));
+                                painter.text(
+                                    Pos2::new(origen_x + 6.0, origen_y - 6.0),
+                                    egui::Align2::LEFT_BOTTOM,
+                                    "(0,0)",
+                                    FontId::monospace(9.0),
+                                    Color32::from_rgb(148, 163, 184),
+                                );
+                            }
+
+                            // Traza historica de trayectoria recorrida
+                            let puntos_trayectoria: Vec<Pos2> = self.simulador.trayectoria
+                                .iter()
+                                .map(|p| Pos2::new(center.x + (p.x - pose.x) * scale, center.y - (p.y - pose.y) * scale))
+                                .collect();
+
+                            if puntos_trayectoria.len() >= 2 {
+                                for pair in puntos_trayectoria.windows(2) {
+                                    if rect.contains(pair[0]) || rect.contains(pair[1]) {
+                                        painter.line_segment([pair[0], pair[1]], Stroke::new(1.5f32, Color32::from_rgb(0, 245, 212)));
+                                    }
+                                }
+                            }
+
+                            // Renderizado del vehiculo en el simulador
+                            Self::dibujar_rover_en_simulador(
+                                &painter,
+                                center,
+                                pose.theta_rad,
+                                scale,
+                                &self.simulador.parametros,
+                                &self.estado_chasis,
+                            );
+
+                            // HUD de telemetria en tiempo real
+                            let hud_pos = Pos2::new(rect.left() + 8.0, rect.top() + 8.0);
+                            let r_hud = if pose.radio_giro.is_infinite() {
+                                "INF".to_string()
+                            } else {
+                                format!("{:.2}m", pose.radio_giro)
+                            };
+                            let hud_text = format!(
+                                "X: {:+.2}m  Y: {:+.2}m  Yaw: {:+.1} deg\nVel: {:.2}m/s  w: {:+.2}rad/s  R_icr: {}\nDist: {:.2}m",
+                                pose.x, pose.y, pose.theta_rad.to_degrees(),
+                                pose.vel_lineal, pose.omega_rad_s, r_hud, self.simulador.distancia_acumulada_m
+                            );
+                            painter.text(
+                                hud_pos,
+                                egui::Align2::LEFT_TOP,
+                                hud_text,
+                                FontId::monospace(9.5),
+                                Color32::from_rgb(226, 232, 240),
+                            );
+
+                            // Controles del simulador
+                            ui.add_space(4.0);
+                            ui.horizontal(|ui| {
+                                if ui.button("[Reiniciar Pose (0,0)]").clicked() {
+                                    self.simulador.reiniciar();
+                                }
+                                if ui.button("[Limpiar Traza]").clicked() {
+                                    self.simulador.limpiar_trayectoria();
+                                }
+                            });
+                        }
                     });
 
                     ui.add_space(8.0);
@@ -896,7 +1124,7 @@ impl RoverApp {
     fn dibujar_rueda(
         painter: &egui::Painter,
         pos: Pos2,
-        angulo_deg: u8,
+        angulo_deg: u16,
         pwm: i16,
         label: &str,
     ) {
@@ -987,6 +1215,120 @@ impl RoverApp {
                 vec![p_fin, v1, v2],
                 arrow_color,
                 Stroke::NONE,
+            ));
+        }
+    }
+
+    /// Renderiza el rover en la vista del simulador plano con su huella fisica, enlaces y ruedas rotadas.
+    fn dibujar_rover_en_simulador(
+        painter: &egui::Painter,
+        center: Pos2,
+        theta_rad: f32,
+        scale: f32,
+        params: &crate::simulation::ParametrosRover,
+        estado: &crate::kinematics::EstadoChasis,
+    ) {
+        let l_px = params.semi_longitud_l * scale;
+        let w_px = params.semi_ancho_w * scale;
+
+        // Transformacion: coordenadas locales del rover a pantalla centrada
+        let local_to_screen = |x_loc: f32, y_loc: f32| -> Pos2 {
+            let xr = x_loc * theta_rad.cos() + y_loc * theta_rad.sin();
+            let yr = -x_loc * theta_rad.sin() + y_loc * theta_rad.cos();
+            Pos2::new(center.x + xr, center.y - yr)
+        };
+
+        // Cuerpo central
+        let body_w = w_px * 0.7;
+        let body_h = l_px * 1.5;
+        let body_corners = [
+            local_to_screen(-body_w, body_h),
+            local_to_screen(body_w, body_h),
+            local_to_screen(body_w, -body_h),
+            local_to_screen(-body_w, -body_h),
+        ];
+        painter.add(egui::Shape::convex_polygon(
+            body_corners.to_vec(),
+            Color32::from_rgb(30, 41, 59),
+            Stroke::new(1.2f32, Color32::from_rgb(0, 245, 212)),
+        ));
+
+        // Flecha de proa indicando frente del vehiculo
+        let proa_base = local_to_screen(0.0, body_h * 0.3);
+        let proa_punta = local_to_screen(0.0, body_h + 10.0);
+        painter.line_segment([proa_base, proa_punta], Stroke::new(1.8f32, Color32::from_rgb(56, 176, 0)));
+
+        // Coordenadas locales de las 6 ruedas
+        let wheel_coords_loc = [
+            (-w_px, l_px),   // FL (M1)
+            (-w_px, 0.0),    // ML (M2)
+            (-w_px, -l_px),  // RL (M3)
+            (w_px, l_px),    // FR (M4)
+            (w_px, 0.0),     // MR (M5)
+            (w_px, -l_px),   // RR (M6)
+        ];
+
+        // Enlaces de suspension Rocker-Bogie
+        let pos_fl = local_to_screen(-w_px, l_px);
+        let pos_ml = local_to_screen(-w_px, 0.0);
+        let pos_rl = local_to_screen(-w_px, -l_px);
+        let pos_fr = local_to_screen(w_px, l_px);
+        let pos_mr = local_to_screen(w_px, 0.0);
+        let pos_rr = local_to_screen(w_px, -l_px);
+
+        let stroke_arm = Stroke::new(1.5f32, Color32::from_rgb(100, 116, 139));
+        painter.line_segment([pos_fl, pos_ml], stroke_arm);
+        painter.line_segment([pos_ml, pos_rl], stroke_arm);
+        painter.line_segment([pos_fr, pos_mr], stroke_arm);
+        painter.line_segment([pos_mr, pos_rr], stroke_arm);
+        painter.line_segment([local_to_screen(-body_w, 0.0), pos_ml], stroke_arm);
+        painter.line_segment([local_to_screen(body_w, 0.0), pos_mr], stroke_arm);
+
+        // Angulos de servo para cada rueda (en grados 0..360)
+        let s = estado.servos;
+        let angulos = [s.s1, 90, s.s3, s.s2, 90, s.s4];
+        let pwms = estado.pwms_motores;
+
+        let w_half = 5.0f32;
+        let h_half = 10.0f32;
+
+        for i in 0..6 {
+            let (lx, ly) = wheel_coords_loc[i];
+            let wheel_pos = local_to_screen(lx, ly);
+            let steer_deg = angulos[i];
+            let pwm = pwms[i];
+
+            let steer_rad = (90.0 - steer_deg as f32).to_radians();
+            let total_rad = theta_rad + steer_rad;
+
+            let corners = [
+                Vec2::new(-w_half, -h_half),
+                Vec2::new(w_half, -h_half),
+                Vec2::new(w_half, h_half),
+                Vec2::new(-w_half, h_half),
+            ];
+
+            let rotated: Vec<Pos2> = corners
+                .iter()
+                .map(|&c| {
+                    let rx = c.x * total_rad.cos() - c.y * total_rad.sin();
+                    let ry = c.x * total_rad.sin() + c.y * total_rad.cos();
+                    Pos2::new(wheel_pos.x + rx, wheel_pos.y + ry)
+                })
+                .collect();
+
+            let wheel_color = if pwm > 0 {
+                Color32::from_rgb(56, 176, 0)
+            } else if pwm < 0 {
+                Color32::from_rgb(255, 159, 28)
+            } else {
+                Color32::from_rgb(100, 116, 139)
+            };
+
+            painter.add(egui::Shape::convex_polygon(
+                rotated,
+                wheel_color,
+                Stroke::new(1.0f32, Color32::from_rgb(203, 213, 225)),
             ));
         }
     }

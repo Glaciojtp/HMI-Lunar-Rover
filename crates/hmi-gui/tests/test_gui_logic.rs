@@ -182,16 +182,16 @@ fn test_potencia_media_por_lado() {
 #[test]
 fn test_restriccion_estricta_angulos_servos() {
     let s = AngulosServos::clamped(0, 5, 180, 255);
-    assert_eq!(s.s1, ANGULO_MIN); // 10
-    assert_eq!(s.s2, ANGULO_MIN); // 10
-    assert_eq!(s.s3, ANGULO_MAX); // 170
-    assert_eq!(s.s4, ANGULO_MAX); // 170
+    assert_eq!(s.s1, ANGULO_MIN as u16); // 10
+    assert_eq!(s.s2, ANGULO_MIN as u16); // 10
+    assert_eq!(s.s3, ANGULO_MAX as u16); // 170
+    assert_eq!(s.s4, ANGULO_MAX as u16); // 170
 }
 
 #[test]
 fn test_presets_servos() {
     let mut s = AngulosServos::default();
-    assert_eq!(s.s1, ANGULO_CENTRO);
+    assert_eq!(s.s1, ANGULO_CENTRO as u16);
 
     s.preset_point_turn();
     assert_eq!(s.s1, 45);
@@ -199,7 +199,7 @@ fn test_presets_servos() {
     assert_eq!(s.s3, 135);
     assert_eq!(s.s4, 45);
 
-    s.preset_crab();
+    s.preset_crab(false);
     assert_eq!(s.s1, 45);
     assert_eq!(s.s2, 45);
     assert_eq!(s.s3, 45);
@@ -210,6 +210,39 @@ fn test_presets_servos() {
     assert_eq!(s.s2, 90);
     assert_eq!(s.s3, 90);
     assert_eq!(s.s4, 90);
+}
+
+#[test]
+fn test_servos_360_clamping_y_presets() {
+    let mut s = AngulosServos::default();
+    s.preset_crab(true);
+    assert_eq!(s.s1, 180);
+    assert_eq!(s.s2, 180);
+    assert_eq!(s.s3, 180);
+    assert_eq!(s.s4, 180);
+
+    // Inversion modular en 360
+    let mut s2 = AngulosServos::new(30, 60, 90, 120);
+    s2.invertir(true);
+    assert_eq!(s2.s1, 330);
+    assert_eq!(s2.s2, 300);
+    assert_eq!(s2.s3, 270);
+    assert_eq!(s2.s4, 240);
+
+    // Inversion normal (180 - theta)
+    let mut s3 = AngulosServos::new(30, 60, 90, 120);
+    s3.invertir(false);
+    assert_eq!(s3.s1, 150);
+    assert_eq!(s3.s2, 120);
+    assert_eq!(s3.s3, 90);
+    assert_eq!(s3.s4, 60);
+
+    // Clamping continuo [0, 360]
+    let s4 = AngulosServos::new(400, 500, 0, 180).asegurar_limites(true);
+    assert_eq!(s4.s1, 360);
+    assert_eq!(s4.s2, 360);
+    assert_eq!(s4.s3, 0);
+    assert_eq!(s4.s4, 180);
 }
 
 // =========================================================================
@@ -225,7 +258,7 @@ fn test_cinematica_parada_de_emergencia() {
     teclas.w = true;
     teclas.space = true; // Espacio tiene prioridad absoluta
 
-    let estado = calcular_cinematica(&teclas, ModoConduccion::Ackermann, &trims, &servos, false);
+    let estado = calcular_cinematica(&teclas, ModoConduccion::Ackermann, &trims, &servos, false, false);
     assert_eq!(estado.traccion_izq, 0);
     assert_eq!(estado.traccion_der, 0);
     assert_eq!(estado.comando_nombre, "STOP");
@@ -240,7 +273,7 @@ fn test_cinematica_ackermann_avance_recto() {
     let mut teclas = TeclasEstado::default();
     teclas.w = true;
 
-    let estado = calcular_cinematica(&teclas, ModoConduccion::Ackermann, &trims, &servos, false);
+    let estado = calcular_cinematica(&teclas, ModoConduccion::Ackermann, &trims, &servos, false, false);
     assert_eq!(estado.traccion_izq, 150);
     assert_eq!(estado.traccion_der, 150);
     assert_eq!(estado.servos.s1, 90);
@@ -257,7 +290,7 @@ fn test_cinematica_ackermann_giro_izquierda() {
     teclas.w = true;
     teclas.a = true;
 
-    let estado = calcular_cinematica(&teclas, ModoConduccion::Ackermann, &trims, &servos, false);
+    let estado = calcular_cinematica(&teclas, ModoConduccion::Ackermann, &trims, &servos, false, false);
     assert_eq!(estado.servos.s1, 120);
     assert_eq!(estado.servos.s2, 120);
     assert_eq!(estado.servos.s3, 60);
@@ -275,7 +308,7 @@ fn test_cinematica_point_turn_q() {
     let mut teclas = TeclasEstado::default();
     teclas.q = true;
 
-    let estado = calcular_cinematica(&teclas, ModoConduccion::Ackermann, &trims, &servos, false);
+    let estado = calcular_cinematica(&teclas, ModoConduccion::Ackermann, &trims, &servos, false, false);
     assert_eq!(estado.servos.s1, 45);
     assert_eq!(estado.servos.s2, 135);
     assert_eq!(estado.servos.s3, 135);
@@ -292,7 +325,7 @@ fn test_generacion_paquete_rover_binario() {
     let mut teclas = TeclasEstado::default();
     teclas.w = true;
 
-    let estado = calcular_cinematica(&teclas, ModoConduccion::Ackermann, &trims, &servos, false);
+    let estado = calcular_cinematica(&teclas, ModoConduccion::Ackermann, &trims, &servos, false, false);
     let pkt = generar_paquete_rover(&estado);
 
     assert_eq!(pkt.traccion_izq(), 150);
@@ -323,7 +356,7 @@ fn test_cinematica_neutro_respeta_servos_manuales() {
         ModoConduccion::Crab,
         ModoConduccion::Manual,
     ] {
-        let estado = calcular_cinematica(&teclas, modo, &trims, &servos, false);
+        let estado = calcular_cinematica(&teclas, modo, &trims, &servos, false, false);
         assert_eq!(estado.traccion_izq, 0);
         assert_eq!(estado.traccion_der, 0);
         assert_eq!(estado.servos.s1, 140);
@@ -332,6 +365,36 @@ fn test_cinematica_neutro_respeta_servos_manuales() {
         assert_eq!(estado.servos.s4, 50);
         assert_eq!(estado.comando_nombre, "NEUTRO");
     }
+}
+
+#[test]
+fn test_simulador_plano_odometria_recta_y_giro() {
+    use hmi_gui::simulation::SimuladorPlano;
+
+    let mut sim = SimuladorPlano::new();
+    assert_eq!(sim.pose.x, 0.0);
+    assert_eq!(sim.pose.y, 0.0);
+    assert_eq!(sim.pose.theta_rad, 0.0);
+
+    let trims = TrimsMotores::default();
+    let servos = AngulosServos::default();
+    let mut teclas = TeclasEstado::default();
+    teclas.w = true;
+
+    let estado_recto = calcular_cinematica(&teclas, ModoConduccion::Ackermann, &trims, &servos, false, false);
+
+    // Integrar 1 segundo a avance recto
+    sim.tick(&estado_recto, Some(1.0));
+    assert!(sim.pose.y > 0.1, "El rover debe haber avanzado en Y: y={}", sim.pose.y);
+    assert!(sim.pose.x.abs() < 1e-4, "El rover debe permanecer centrado en X: x={}", sim.pose.x);
+    assert!(sim.pose.radio_giro.is_infinite(), "El radio de giro en linea recta debe ser infinito");
+
+    // Integrar giro Ackermann
+    teclas.a = true;
+    let estado_giro = calcular_cinematica(&teclas, ModoConduccion::Ackermann, &trims, &servos, false, false);
+    sim.tick(&estado_giro, Some(1.0));
+    assert!(sim.pose.theta_rad != 0.0, "La guiñada debe haber cambiado al girar");
+    assert!(!sim.pose.radio_giro.is_infinite(), "El radio de giro en curva debe ser finito");
 }
 
 #[test]

@@ -127,40 +127,74 @@ impl TrimsMotores {
 /// Angulos de orientacion para los 4 servomotores independientes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AngulosServos {
-    pub s1: u8, // Delantero Izquierdo
-    pub s2: u8, // Delantero Derecho
-    pub s3: u8, // Trasero Izquierdo
-    pub s4: u8, // Trasero Derecho
+    pub s1: u16, // Delantero Izquierdo
+    pub s2: u16, // Delantero Derecho
+    pub s3: u16, // Trasero Izquierdo
+    pub s4: u16, // Trasero Derecho
 }
 
 impl Default for AngulosServos {
     fn default() -> Self {
         Self {
-            s1: ANGULO_CENTRO,
-            s2: ANGULO_CENTRO,
-            s3: ANGULO_CENTRO,
-            s4: ANGULO_CENTRO,
+            s1: ANGULO_CENTRO as u16,
+            s2: ANGULO_CENTRO as u16,
+            s3: ANGULO_CENTRO as u16,
+            s4: ANGULO_CENTRO as u16,
         }
     }
 }
 
 impl AngulosServos {
+    /// Crea una nueva configuracion con valores explicitos sin clamping.
+    pub fn new(s1: u16, s2: u16, s3: u16, s4: u16) -> Self {
+        Self { s1, s2, s3, s4 }
+    }
+
     /// Crea una nueva configuracion aplicando restriccion estricta a [10, 170] grados.
-    pub fn clamped(s1: u8, s2: u8, s3: u8, s4: u8) -> Self {
+    pub fn clamped(s1: u16, s2: u16, s3: u16, s4: u16) -> Self {
         Self {
-            s1: s1.clamp(ANGULO_MIN, ANGULO_MAX),
-            s2: s2.clamp(ANGULO_MIN, ANGULO_MAX),
-            s3: s3.clamp(ANGULO_MIN, ANGULO_MAX),
-            s4: s4.clamp(ANGULO_MIN, ANGULO_MAX),
+            s1: s1.clamp(ANGULO_MIN as u16, ANGULO_MAX as u16),
+            s2: s2.clamp(ANGULO_MIN as u16, ANGULO_MAX as u16),
+            s3: s3.clamp(ANGULO_MIN as u16, ANGULO_MAX as u16),
+            s4: s4.clamp(ANGULO_MIN as u16, ANGULO_MAX as u16),
+        }
+    }
+
+    /// Crea una nueva configuracion permitiendo rango continuo 360 grados [0, 360].
+    pub fn clamped_360(s1: u16, s2: u16, s3: u16, s4: u16) -> Self {
+        Self {
+            s1: s1.clamp(0, 360),
+            s2: s2.clamp(0, 360),
+            s3: s3.clamp(0, 360),
+            s4: s4.clamp(0, 360),
+        }
+    }
+
+    /// Devuelve una copia asegurando los limites segun este habilitado o no el modo 360 grados.
+    pub fn asegurar_limites(&self, modo_360: bool) -> Self {
+        if modo_360 {
+            Self {
+                s1: self.s1.clamp(0, 360),
+                s2: self.s2.clamp(0, 360),
+                s3: self.s3.clamp(0, 360),
+                s4: self.s4.clamp(0, 360),
+            }
+        } else {
+            Self {
+                s1: self.s1.clamp(ANGULO_MIN as u16, ANGULO_MAX as u16),
+                s2: self.s2.clamp(ANGULO_MIN as u16, ANGULO_MAX as u16),
+                s3: self.s3.clamp(ANGULO_MIN as u16, ANGULO_MAX as u16),
+                s4: self.s4.clamp(ANGULO_MIN as u16, ANGULO_MAX as u16),
+            }
         }
     }
 
     /// Centra todos los servomotores a 90 grados.
     pub fn centrar(&mut self) {
-        self.s1 = ANGULO_CENTRO;
-        self.s2 = ANGULO_CENTRO;
-        self.s3 = ANGULO_CENTRO;
-        self.s4 = ANGULO_CENTRO;
+        self.s1 = ANGULO_CENTRO as u16;
+        self.s2 = ANGULO_CENTRO as u16;
+        self.s3 = ANGULO_CENTRO as u16;
+        self.s4 = ANGULO_CENTRO as u16;
     }
 
     /// Configura la orientacion tangencial al circulo para rotacion 360 grados sobre el eje.
@@ -172,20 +206,34 @@ impl AngulosServos {
         self.s4 = 45;
     }
 
-    /// Configura las 4 ruedas en paralelo a 45 grados para desplazamiento diagonal.
-    pub fn preset_crab(&mut self) {
-        self.s1 = 45;
-        self.s2 = 45;
-        self.s3 = 45;
-        self.s4 = 45;
+    /// Configura las 4 ruedas en paralelo (45 deg en estandar, o 180 deg en servos 360 para lateral puro).
+    pub fn preset_crab(&mut self, servos_360: bool) {
+        if servos_360 {
+            self.s1 = 180;
+            self.s2 = 180;
+            self.s3 = 180;
+            self.s4 = 180;
+        } else {
+            self.s1 = 45;
+            self.s2 = 45;
+            self.s3 = 45;
+            self.s4 = 45;
+        }
     }
 
-    /// Invierte los angulos respetando el centro de 90 grados (180 - angulo).
-    pub fn invertir(&mut self) {
-        self.s1 = (180 - self.s1 as i16).clamp(ANGULO_MIN as i16, ANGULO_MAX as i16) as u8;
-        self.s2 = (180 - self.s2 as i16).clamp(ANGULO_MIN as i16, ANGULO_MAX as i16) as u8;
-        self.s3 = (180 - self.s3 as i16).clamp(ANGULO_MIN as i16, ANGULO_MAX as i16) as u8;
-        self.s4 = (180 - self.s4 as i16).clamp(ANGULO_MIN as i16, ANGULO_MAX as i16) as u8;
+    /// Invierte los angulos respetando el centro de 90 grados o 360 grados.
+    pub fn invertir(&mut self, servos_360: bool) {
+        if servos_360 {
+            self.s1 = (360 - self.s1 as i32).rem_euclid(360) as u16;
+            self.s2 = (360 - self.s2 as i32).rem_euclid(360) as u16;
+            self.s3 = (360 - self.s3 as i32).rem_euclid(360) as u16;
+            self.s4 = (360 - self.s4 as i32).rem_euclid(360) as u16;
+        } else {
+            self.s1 = (180 - self.s1 as i16).clamp(ANGULO_MIN as i16, ANGULO_MAX as i16) as u16;
+            self.s2 = (180 - self.s2 as i16).clamp(ANGULO_MIN as i16, ANGULO_MAX as i16) as u16;
+            self.s3 = (180 - self.s3 as i16).clamp(ANGULO_MIN as i16, ANGULO_MAX as i16) as u16;
+            self.s4 = (180 - self.s4 as i16).clamp(ANGULO_MIN as i16, ANGULO_MAX as i16) as u16;
+        }
     }
 }
 
@@ -206,6 +254,7 @@ pub fn calcular_cinematica(
     trims: &TrimsMotores,
     servos_manuales: &AngulosServos,
     invertir_servos: bool,
+    servos_360: bool,
 ) -> EstadoChasis {
     // Parada de emergencia prioritaria
     if teclas.space {
@@ -348,15 +397,29 @@ pub fn calcular_cinematica(
                 }
             }
             ModoConduccion::Crab => {
-                servos.preset_crab();
+                servos.preset_crab(servos_360);
                 if teclas.w || teclas.d {
                     traccion_izq = p_izq;
                     traccion_der = p_der;
                     comando_nombre = "CRAB_FWD";
+                    if servos_360 {
+                        let ang = if !invertir_servos { 180 } else { 0 };
+                        servos.s1 = ang; servos.s2 = ang; servos.s3 = ang; servos.s4 = ang;
+                    } else {
+                        let ang = if !invertir_servos { 45 } else { 135 };
+                        servos.s1 = ang; servos.s2 = ang; servos.s3 = ang; servos.s4 = ang;
+                    }
                 } else if teclas.s || teclas.a {
                     traccion_izq = -p_izq;
                     traccion_der = -p_der;
                     comando_nombre = "CRAB_REV";
+                    if servos_360 {
+                        let ang = if !invertir_servos { 0 } else { 180 };
+                        servos.s1 = ang; servos.s2 = ang; servos.s3 = ang; servos.s4 = ang;
+                    } else {
+                        let ang = if !invertir_servos { 135 } else { 45 };
+                        servos.s1 = ang; servos.s2 = ang; servos.s3 = ang; servos.s4 = ang;
+                    }
                 }
             }
             ModoConduccion::Manual => {
@@ -382,8 +445,8 @@ pub fn calcular_cinematica(
         }
     }
 
-    if invertir_servos && modo != ModoConduccion::Manual {
-        servos.invertir();
+    if invertir_servos && modo != ModoConduccion::Manual && modo != ModoConduccion::Crab {
+        servos.invertir(servos_360);
     }
 
     // Calcular PWMs individuales para M1..M6
@@ -398,10 +461,16 @@ pub fn calcular_cinematica(
     pwms_motores[4] = sentido_der * trims.calcular_pwm_motor(5);
     pwms_motores[5] = sentido_der * trims.calcular_pwm_motor(6);
 
+    let servos_finales = if servos_360 {
+        AngulosServos::clamped_360(servos.s1, servos.s2, servos.s3, servos.s4)
+    } else {
+        AngulosServos::clamped(servos.s1, servos.s2, servos.s3, servos.s4)
+    };
+
     EstadoChasis {
         traccion_izq: traccion_izq.clamp(TRACCION_MIN, TRACCION_MAX),
         traccion_der: traccion_der.clamp(TRACCION_MIN, TRACCION_MAX),
-        servos: AngulosServos::clamped(servos.s1, servos.s2, servos.s3, servos.s4),
+        servos: servos_finales,
         pwms_motores,
         comando_nombre,
     }
@@ -412,7 +481,7 @@ pub fn generar_paquete_rover(estado: &EstadoChasis) -> PaqueteRover {
     PaqueteRover::clamped(
         estado.traccion_izq,
         estado.traccion_der,
-        estado.servos.s1,
-        estado.servos.s2,
+        estado.servos.s1.min(255) as u8,
+        estado.servos.s2.min(255) as u8,
     )
 }
