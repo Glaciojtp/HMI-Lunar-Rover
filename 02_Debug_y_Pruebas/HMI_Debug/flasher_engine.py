@@ -334,9 +334,23 @@ class FlasherEngine:
 
             retcode = proceso.wait(timeout=timeout)
             return retcode == 0
+        except subprocess.TimeoutExpired:
+            if callback_log:
+                callback_log(f"[ERROR] Tiempo de espera agotado ({timeout}s) en subproceso.")
+            try:
+                proceso.kill()
+                proceso.wait(timeout=1.0)
+            except Exception:
+                pass
+            return False
         except (subprocess.SubprocessError, OSError) as e:
             if callback_log:
                 callback_log(f"[ERROR] Excepcion al ejecutar subproceso: {e}")
+            try:
+                proceso.kill()
+                proceso.wait(timeout=1.0)
+            except Exception:
+                pass
             return False
 
     def sincronizar_calibracion(
@@ -364,6 +378,12 @@ class FlasherEngine:
             True si la transmision y confirmaciones fueron exitosas, False ante fallos.
         """
         try:
+            if hasattr(serial_conn, "timeout"):
+                try:
+                    serial_conn.timeout = timeout
+                except Exception:
+                    pass
+
             trama = formatear_trama_calibracion(trims, servos)
             if callback_log:
                 callback_log(f"[SYS] Enviando calibracion: {trama.strip()}")
@@ -490,8 +510,10 @@ class FlasherEngine:
 
         # 4. Verificar herramientas disponibles
         herramientas = self.verificar_herramientas()
-        usar_cli = (tool == "arduino_cli") or (tool is None and herramientas["arduino_cli"])
-        usar_esptool = (tool == "esptool") or (tool is None and not herramientas["arduino_cli"] and herramientas["esptool"])
+        usar_cli = (tool == "arduino_cli") or (tool is None and herramientas["arduino_cli"] and ruta_sketch.suffix == ".ino")
+        usar_esptool = (tool == "esptool") or (
+            tool is None and (not herramientas["arduino_cli"] or ruta_sketch.suffix == ".bin") and herramientas["esptool"]
+        )
 
         # Intento de flasheo con arduino-cli
         if usar_cli and herramientas["arduino_cli"] and perfil.fqbn and ruta_sketch.suffix == ".ino":
@@ -511,7 +533,14 @@ class FlasherEngine:
                 return False
 
         # Intento de flasheo con esptool
-        if (usar_esptool or not herramientas["arduino_cli"]) and herramientas["esptool"]:
+        if (usar_esptool or (tool == "esptool")) and herramientas["esptool"]:
+            if "SAMD" in perfil.mcu.upper() or "SAMD" in perfil.id.upper():
+                if callback_log:
+                    callback_log(
+                        f"[ERROR] La arquitectura {perfil.mcu} (SAMD21) no es compatible con esptool; requiere arduino-cli o bossac."
+                    )
+                return False
+
             bin_path: Optional[Path] = None
             if ruta_sketch.suffix == ".bin":
                 bin_path = ruta_sketch
@@ -546,7 +575,7 @@ class FlasherEngine:
             else:
                 if callback_log:
                     callback_log(
-                        f"[ERROR] arduino-cli no esta disponible y no se encontro archivo precompilado .bin para {ruta_sketch.name}."
+                        f"[ERROR] arduino-cli no esta disponible o no es aplicable, y no se encontro archivo precompilado .bin para {ruta_sketch.name}."
                     )
                 return False
 

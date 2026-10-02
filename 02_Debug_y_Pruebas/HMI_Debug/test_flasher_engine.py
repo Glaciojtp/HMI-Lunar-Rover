@@ -531,6 +531,56 @@ class TestMetodoFlashear:
         assert exito is False
         assert any("no se encontraron herramientas" in log.lower() for log in logs)
 
+    @patch("flasher_engine.FlasherEngine.verificar_herramientas")
+    @patch("flasher_engine.FlasherEngine._ejecutar_subproceso")
+    def test_flasheo_bin_con_ambas_herramientas_disponibles(self, mock_ejecutar, mock_verificar, tmp_path):
+        """Verifica que si se pasa un archivo .bin y ambas herramientas estan presentes, se use esptool."""
+        mock_verificar.return_value = {"arduino_cli": True, "esptool": True}
+        mock_ejecutar.return_value = True
+
+        fake_bin = tmp_path / "firmware.bin"
+        fake_bin.write_bytes(b"\x00" * 32)
+
+        registry = HardwareProfileRegistry()
+        perfil = registry.obtener_perfil("ARDUINO_NANO_ESP32")
+
+        engine = FlasherEngine()
+        exito = engine.flashear(
+            puerto="COM3",
+            perfil=perfil,
+            rol="TX",
+            bin_path_override=fake_bin,
+        )
+
+        assert exito is True
+        mock_ejecutar.assert_called_once()
+        cmd_ejecutado = mock_ejecutar.call_args[0][0]
+        assert any("esptool" in part for part in cmd_ejecutado)
+
+    @patch("flasher_engine.FlasherEngine.verificar_herramientas")
+    def test_flasheo_samd_incompatible_con_esptool(self, mock_verificar, tmp_path):
+        """Verifica que un perfil SAMD21 (MKR1310) rechace el uso de esptool con un mensaje claro."""
+        mock_verificar.return_value = {"arduino_cli": False, "esptool": True}
+
+        fake_bin = tmp_path / "firmware.bin"
+        fake_bin.write_bytes(b"\x00" * 32)
+
+        registry = HardwareProfileRegistry()
+        perfil = registry.obtener_perfil("ARDUINO_MKR_1310")
+
+        logs = []
+        engine = FlasherEngine()
+        exito = engine.flashear(
+            puerto="COM4",
+            perfil=perfil,
+            rol="RX",
+            bin_path_override=fake_bin,
+            callback_log=logs.append,
+        )
+
+        assert exito is False
+        assert any("no es compatible con esptool" in log.lower() for log in logs)
+
 
 # ==============================================================================
 # 9. REGLA ESTRICTA DE PROYECTO: CERO EMOJIS
