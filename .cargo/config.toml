@@ -1,0 +1,6 @@
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-L", "/home/joaqu/.local/lib"]
+
+[env]
+PATH = { value = "/home/joaqu/.local/bin:/home/joaqu/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", relative = false }
+PKG_CONFIG_PATH = { value = "/home/joaqu/.local/lib/pkgconfig", relative = false }

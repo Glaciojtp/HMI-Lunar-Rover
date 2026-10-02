@@ -8,3 +8,6 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 protocol-rover = { path = "../protocol-rover" }
+eframe = "0.28"
+egui = "0.28"
+serialport = "4.5"
