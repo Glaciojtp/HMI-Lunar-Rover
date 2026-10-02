@@ -86,8 +86,9 @@ class SimuladorCinematicoRover:
         w = self.params.semi_ancho_w
 
         # Desviacion respecto al centro (90 deg = 0 rad)
-        delta_s1 = math.radians(angulo_s1 - 90.0)
-        delta_s2 = math.radians(angulo_s2 - 90.0)
+        # Menor a 90 deg (ej 60) = giro derecha (+rad), Mayor a 90 deg (ej 120) = giro izquierda (-rad)
+        delta_s1 = math.radians(90.0 - angulo_s1)
+        delta_s2 = math.radians(90.0 - angulo_s2)
         delta_prom = (delta_s1 + delta_s2) / 2.0
 
         if abs(pwm_izq) == 0 and abs(pwm_der) == 0:
@@ -98,16 +99,17 @@ class SimuladorCinematicoRover:
 
         if modo_giro_eje:
             # Rotacion pura sobre el eje central (Point Turn)
-            # ICR en (0, 0). Las 4 esquinas apuntan a +-45 deg respecto a los ejes.
+            # Horario (Der): v_izq > 0, v_der < 0 => omega > 0
+            # Antihorario (Izq): v_izq < 0, v_der > 0 => omega < 0
             r_esquina = math.sqrt(l * l + w * w)
-            omega = (v_der - v_izq) / (2.0 * r_esquina)
+            omega = (v_izq - v_der) / (2.0 * r_esquina)
             vx_loc = 0.0
             vy_loc = 0.0
             radio = 0.0
         elif modo_cangrejo:
             # Traslacion diagonal o transversal sin rotacion
             v_avg = (v_izq + v_der) / 2.0
-            ang_marcha = -delta_s1
+            ang_marcha = delta_s1
             vx_loc = v_avg * math.sin(ang_marcha)
             vy_loc = v_avg * math.cos(ang_marcha)
             omega = 0.0
@@ -120,7 +122,7 @@ class SimuladorCinematicoRover:
                 # Marcha rectilinea
                 vx_loc = 0.0
                 vy_loc = v_avg
-                omega = (v_der - v_izq) / (2.0 * w)
+                omega = (v_izq - v_der) / (2.0 * w)
                 radio = float("inf")
             else:
                 # Curva coordinada: centro instantaneo de rotacion sobre eje medio (y = 0)
