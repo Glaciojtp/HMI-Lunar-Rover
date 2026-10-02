@@ -2,19 +2,20 @@
 # -*- coding: utf-8 -*-
 """
 =====================================================================================
- HMI ROVER LUNAR V2.0 — DEBUG Y TELEMETRIA AVANZADA CON DOBLE MONITOR TX / RX
+ HMI ROVER LUNAR V2.0 - DEBUG Y TELEMETRIA AVANZADA CON DOBLE MONITOR TX / RX
 =====================================================================================
- Características Principales:
-  1. Soporte para Doble Puerto COM simultáneo:
-     - Puerto TX: ESP32-C3 SuperMini (Transmisor conectado a la PC)
-     - Puerto RX: Arduino MKR 1310 (Receptor conectado a la PC para banco de pruebas)
-  2. Motor de Validación Cruzada en Tiempo Real:
-     - Compara campo por campo lo que se envía al ESP32 vs lo que confirma el MKR.
-     - Cálculo de latencia de enlace de radio (ms) y detección de discrepancias.
-  3. Doble Gráfico 2D del Rocker-Bogie (Lado a Lado):
-     - Gráfico 1: "🛰️ TRANSMITIDO (Comando GUI)"
-     - Gráfico 2: "🤖 RECIBIDO (Telemetría Real del MKR 1310)"
-  4. Consola de Depuración con 5 canales de color (TX, ESP32, MKR, Validación, Alertas).
+ Caracteristicas Principales:
+  1. Soporte para Doble Puerto COM simultaneo:
+     - Puerto TX: Transmisor conectado a la PC (Arduino Nano ESP32 / ESP32-C3)
+     - Puerto RX: Receptor conectado a la PC para banco de pruebas (Nano ESP32 / MKR 1310)
+  2. Motor de Validacion Cruzada en Tiempo Real:
+     - Compara campo por campo lo que se envia al TX vs lo que confirma el RX.
+     - Calculo de latencia de enlace de radio (ms) y deteccion de discrepancias.
+  3. Doble Grafico 2D del Rocker-Bogie (Lado a Lado):
+     - Grafico 1: "[TX] TRANSMITIDO (Comando GUI)"
+     - Grafico 2: "[RX] RECIBIDO (Telemetria Real RX)"
+  4. Consola de Depuracion con 5 canales de color (TX, MCU, RX, Validacion, Alertas).
+  5. Aprovisionamiento y Flasheo en 1 Clic (FlasherEngine) y Sincronizacion Pre-Despliegue.
 =====================================================================================
 """
 
@@ -23,8 +24,25 @@ import os
 import time
 import math
 import threading
-import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from pathlib import Path
+
+# Asegurar importacion de modulos locales de HMI_Debug
+_dir_actual = os.path.dirname(os.path.abspath(__file__))
+if _dir_actual not in sys.path:
+    sys.path.insert(0, _dir_actual)
+
+from hardware_profiles import (
+    HardwareProfileRegistry,
+    PerfilHardware,
+    PERFILES_OFICIALES,
+    PERFIL_DEFAULT_ID,
+    parsear_handshake,
+)
+from flasher_engine import (
+    FlasherEngine,
+    sanitizar_puerto,
+    formatear_trama_calibracion,
+)
 
 try:
     import serial
@@ -33,21 +51,45 @@ try:
 except ImportError:
     SERIAL_DISPONIBLE = False
 
+try:
+    import tkinter as tk
+    from tkinter import ttk, messagebox, filedialog
+    TKINTER_DISPONIBLE = True
+except ImportError:
+    tk = None
+    ttk = None
+    messagebox = None
+    filedialog = None
+    TKINTER_DISPONIBLE = False
+
 
 class HMIRoverDebug:
     def __init__(self, root):
         self.root = root
-        self.root.title("🛰️ HMI ROVER LUNAR V2.0 — DEPURACION INTEGRAL Y DOBLE TELEMETRIA (TX / RX)")
-        self.root.geometry("1360x900")
-        self.root.minsize(1150, 800)
-        self.root.configure(bg="#0c0e17")
+        if hasattr(self.root, "title"):
+            self.root.title("HMI ROVER LUNAR V2.0 - DEPURACION INTEGRAL Y DOBLE TELEMETRIA (TX / RX)")
+        if hasattr(self.root, "geometry"):
+            self.root.geometry("1360x900")
+        if hasattr(self.root, "minsize"):
+            self.root.minsize(1150, 800)
+        if hasattr(self.root, "configure"):
+            self.root.configure(bg="#0c0e17")
 
-        # Conexión Serial Puerto 1 (Transmisor ESP32-C3)
+        # Registro de perfiles de hardware y motor de flasheo
+        self.registry = HardwareProfileRegistry()
+        self.flasher_engine = FlasherEngine(repo_root=Path(_dir_actual).resolve().parents[1])
+        self.flasheando = False
+
+        # Perfiles seleccionados por defecto (Nano ESP32 tanto para TX como para RX)
+        self.perfil_tx = tk.StringVar(value=PERFIL_DEFAULT_ID) if tk else None
+        self.perfil_rx = tk.StringVar(value=PERFIL_DEFAULT_ID) if tk else None
+
+        # Conexion Serial Puerto 1 (Transmisor TX)
         self.serial_tx = None
         self.conectado_tx = False
         self.hilo_tx = None
 
-        # Conexión Serial Puerto 2 (Receptor Arduino MKR 1310)
+        # Conexion Serial Puerto 2 (Receptor RX)
         self.serial_rx = None
         self.conectado_rx = False
         self.hilo_rx = None
@@ -56,7 +98,7 @@ class HMIRoverDebug:
         self.txt_consola = None
         self._log_buffer = []
 
-        # Métricas de transmisión y recepción
+        # Metricas de transmision y recepcion
         self.contador_tx = 0
         self.contador_rx_mkr = 0
         self.contador_matches = 0
@@ -66,38 +108,38 @@ class HMIRoverDebug:
         self.ultima_latencia_ms = 0.0
 
         # Opciones visuales y de consola
-        self.mostrar_hex = tk.BooleanVar(value=True)
-        self.mostrar_raw_esp = tk.BooleanVar(value=True)
-        self.mostrar_raw_mkr = tk.BooleanVar(value=True)
-        self.auto_scroll = tk.BooleanVar(value=True)
-        self.tx_continuo = tk.BooleanVar(value=True)
+        self.mostrar_hex = tk.BooleanVar(value=True) if tk else None
+        self.mostrar_raw_esp = tk.BooleanVar(value=True) if tk else None
+        self.mostrar_raw_mkr = tk.BooleanVar(value=True) if tk else None
+        self.auto_scroll = tk.BooleanVar(value=True) if tk else None
+        self.tx_continuo = tk.BooleanVar(value=True) if tk else None
 
-        # Estado dinámico de control (TX)
+        # Estado dinamico de control (TX)
         self.comando_actual = "STOP"
-        self.modo_conduccion = tk.StringVar(value="ACKERMANN")
+        self.modo_conduccion = tk.StringVar(value="ACKERMANN") if tk else None
         self.teclas_presionadas = {'w': False, 'a': False, 's': False, 'd': False, 'q': False, 'e': False, 'space': False}
 
         # Variables de Trim porcentual (Ratio 0% a 150%, 100% = 1.0x directo de Master)
-        self.trim_m1 = tk.IntVar(value=100)
-        self.trim_m2 = tk.IntVar(value=100)
-        self.trim_m3 = tk.IntVar(value=100)
-        self.trim_m4 = tk.IntVar(value=100)
-        self.trim_m5 = tk.IntVar(value=100)
-        self.trim_m6 = tk.IntVar(value=100)
+        self.trim_m1 = tk.IntVar(value=100) if tk else None
+        self.trim_m2 = tk.IntVar(value=100) if tk else None
+        self.trim_m3 = tk.IntVar(value=100) if tk else None
+        self.trim_m4 = tk.IntVar(value=100) if tk else None
+        self.trim_m5 = tk.IntVar(value=100) if tk else None
+        self.trim_m6 = tk.IntVar(value=100) if tk else None
         self.lbl_trims = {}
-        self.master_izq = tk.IntVar(value=150)
-        self.master_der = tk.IntVar(value=150)
+        self.master_izq = tk.IntVar(value=150) if tk else None
+        self.master_der = tk.IntVar(value=150) if tk else None
 
-        # Sliders de Servos TX (10° - 170° / 0° - 360°)
-        self.ang_s1 = tk.IntVar(value=90)
-        self.ang_s2 = tk.IntVar(value=90)
-        self.ang_s3 = tk.IntVar(value=90)
-        self.ang_s4 = tk.IntVar(value=90)
-        self.invertir_servos = tk.BooleanVar(value=False)
-        self.servos_360 = tk.BooleanVar(value=False)
+        # Sliders de Servos TX (10 deg - 170 deg / 0 deg - 360 deg)
+        self.ang_s1 = tk.IntVar(value=90) if tk else None
+        self.ang_s2 = tk.IntVar(value=90) if tk else None
+        self.ang_s3 = tk.IntVar(value=90) if tk else None
+        self.ang_s4 = tk.IntVar(value=90) if tk else None
+        self.invertir_servos = tk.BooleanVar(value=False) if tk else None
+        self.servos_360 = tk.BooleanVar(value=False) if tk else None
         self.sliders_servos = {}
 
-        # Conexión Serial Joystick Físico (Arduino Nano)
+        # Conexion Serial Joystick Fisico (Arduino Nano)
         self.serial_joy = None
         self.conectado_joy = False
         self.hilo_joy = None
@@ -111,14 +153,14 @@ class HMIRoverDebug:
         self.ultimo_joy_estop = 0
         self.ultimo_joy_360 = 0
 
-        # Estado Snapshot TX (último enviado)
+        # Estado Snapshot TX (ultimo enviado)
         self.snapshot_tx = {
             'cmd': 'STOP', 'izq': 0, 'der': 0,
             's1': 90, 's2': 90, 's3': 90, 's4': 90,
             't': time.time()
         }
 
-        # Estado Snapshot RX (último confirmado por el MKR)
+        # Estado Snapshot RX (ultimo confirmado por el receptor)
         self.snapshot_rx = {
             'izq': 0, 'der': 0,
             's1': 90, 's2': 90, 's3': 90, 's4': 90,
@@ -127,20 +169,21 @@ class HMIRoverDebug:
             'activo': False
         }
 
-        # Construir Interfaz Gráfica
-        self.configurar_estilos()
-        self.crear_widgets()
-        self.actualizar_labels_trim()
-        self.actualizar_grafico_tx()
-        self.actualizar_grafico_rx()
+        # Construir Interfaz Grafica
+        if tk:
+            self.configurar_estilos()
+            self.crear_widgets()
+            self.actualizar_labels_trim()
+            self.actualizar_grafico_tx()
+            self.actualizar_grafico_rx()
 
-        # Enlazar eventos de teclado
-        self.root.bind("<KeyPress>", self.evento_key_press)
-        self.root.bind("<KeyRelease>", self.evento_key_release)
+            # Enlazar eventos de teclado
+            self.root.bind("<KeyPress>", self.evento_key_press)
+            self.root.bind("<KeyRelease>", self.evento_key_release)
 
-        # Iniciar hilos y reloj de telemetría
-        self.iniciar_hilos()
-        self.bucle_periodico_ui()
+            # Iniciar hilos y reloj de telemetria
+            self.iniciar_hilos()
+            self.bucle_periodico_ui()
 
     def configurar_estilos(self):
         estilo = ttk.Style()
@@ -156,71 +199,111 @@ class HMIRoverDebug:
 
     def crear_widgets(self):
         # =========================================================================
-        # 1. BARRA SUPERIOR: DOBLE CONEXION SERIAL (TX ESP32 & RX MKR)
+        # 1. BARRA SUPERIOR: DOBLE CONEXION SERIAL (TX & RX) Y APROVISIONAMIENTO
         # =========================================================================
         top_bar = ttk.Frame(self.root, style="Card.TFrame", padding=(12, 6))
         top_bar.pack(fill="x", padx=12, pady=(8, 4))
 
-        # --- SECCION TX (ESP32-C3) ---
-        frm_tx_conn = ttk.Frame(top_bar, style="Card.TFrame")
-        frm_tx_conn.pack(side="left", padx=(0, 10))
+        # --- FILA 1: PUERTOS, PERFILES Y CONEXIONES ---
+        row_conn = ttk.Frame(top_bar, style="Card.TFrame")
+        row_conn.pack(fill="x", pady=(0, 4))
 
-        tk.Label(frm_tx_conn, text="📡 TX (ESP32):", bg="#151824", fg="#00f5d4", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 4))
-        self.cb_puerto_tx = ttk.Combobox(frm_tx_conn, width=9, state="readonly")
+        # --- SECCION TX ---
+        frm_tx_conn = ttk.Frame(row_conn, style="Card.TFrame")
+        frm_tx_conn.pack(side="left", padx=(0, 8))
+
+        tk.Label(frm_tx_conn, text="TX:", bg="#151824", fg="#00f5d4", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 3))
+        self.cb_puerto_tx = ttk.Combobox(frm_tx_conn, width=8, state="readonly")
         self.cb_puerto_tx.pack(side="left", padx=2)
+        self.cb_puerto_tx.bind("<<ComboboxSelected>>", self.al_seleccionar_puerto_tx)
+
+        perfiles_ids = [p.id for p in self.registry.listar_perfiles()]
+        self.cb_perfil_tx = ttk.Combobox(frm_tx_conn, width=15, textvariable=self.perfil_tx,
+                                         values=perfiles_ids, state="readonly")
+        self.cb_perfil_tx.pack(side="left", padx=2)
 
         self.btn_conectar_tx = tk.Button(frm_tx_conn, text="Conectar TX", bg="#00f5d4", fg="#0c0e17",
-                                         font=("Segoe UI", 8, "bold"), command=self.toggle_conexion_tx, relief="flat", padx=5)
+                                         font=("Segoe UI", 8, "bold"), command=self.toggle_conexion_tx, relief="flat", padx=4)
         self.btn_conectar_tx.pack(side="left", padx=2)
 
-        self.btn_ping_tx = tk.Button(frm_tx_conn, text="⚡ Ping", bg="#0f766e", fg="#ffffff",
-                                     font=("Segoe UI", 8, "bold"), command=self.ping_tx, relief="flat", padx=4)
+        self.btn_ping_tx = tk.Button(frm_tx_conn, text="IDENT / Ping", bg="#0f766e", fg="#ffffff",
+                                     font=("Segoe UI", 8, "bold"), command=self.ident_o_ping_tx, relief="flat", padx=4)
         self.btn_ping_tx.pack(side="left", padx=2)
 
-        self.btn_reset_tx = tk.Button(frm_tx_conn, text="🔄 Reset", bg="#334155", fg="#fca5a5",
+        self.btn_reset_tx = tk.Button(frm_tx_conn, text="Reset HW", bg="#334155", fg="#fca5a5",
                                       font=("Segoe UI", 8, "bold"), command=self.reset_hw_tx, relief="flat", padx=4)
         self.btn_reset_tx.pack(side="left", padx=2)
 
-        self.badge_tx = tk.Label(frm_tx_conn, text="🔴 TX OFF", bg="#2a2e3f", fg="#f87171", font=("Segoe UI", 8, "bold"), padx=6)
+        self.badge_tx = tk.Label(frm_tx_conn, text="[TX OFF]", bg="#2a2e3f", fg="#f87171", font=("Segoe UI", 8, "bold"), padx=5)
         self.badge_tx.pack(side="left", padx=2)
 
         # Separador vertical
-        ttk.Separator(top_bar, orient="vertical").pack(side="left", fill="y", padx=6)
+        ttk.Separator(row_conn, orient="vertical").pack(side="left", fill="y", padx=6)
 
-        # --- SECCION RX (Arduino MKR 1310) ---
-        frm_rx_conn = ttk.Frame(top_bar, style="Card.TFrame")
-        frm_rx_conn.pack(side="left", padx=(0, 10))
+        # --- SECCION RX ---
+        frm_rx_conn = ttk.Frame(row_conn, style="Card.TFrame")
+        frm_rx_conn.pack(side="left", padx=(0, 8))
 
-        tk.Label(frm_rx_conn, text="🤖 RX (MKR):", bg="#151824", fg="#fbbf24", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 4))
-        self.cb_puerto_rx = ttk.Combobox(frm_rx_conn, width=9, state="readonly")
+        tk.Label(frm_rx_conn, text="RX:", bg="#151824", fg="#fbbf24", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(0, 3))
+        self.cb_puerto_rx = ttk.Combobox(frm_rx_conn, width=8, state="readonly")
         self.cb_puerto_rx.pack(side="left", padx=2)
+        self.cb_puerto_rx.bind("<<ComboboxSelected>>", self.al_seleccionar_puerto_rx)
+
+        self.cb_perfil_rx = ttk.Combobox(frm_rx_conn, width=15, textvariable=self.perfil_rx,
+                                         values=perfiles_ids, state="readonly")
+        self.cb_perfil_rx.pack(side="left", padx=2)
 
         self.btn_conectar_rx = tk.Button(frm_rx_conn, text="Conectar RX", bg="#fbbf24", fg="#0c0e17",
-                                         font=("Segoe UI", 8, "bold"), command=self.toggle_conexion_rx, relief="flat", padx=5)
+                                         font=("Segoe UI", 8, "bold"), command=self.toggle_conexion_rx, relief="flat", padx=4)
         self.btn_conectar_rx.pack(side="left", padx=2)
 
-        self.btn_ping_rx = tk.Button(frm_rx_conn, text="⚡ Ping", bg="#854d0e", fg="#ffffff",
-                                     font=("Segoe UI", 8, "bold"), command=self.ping_rx, relief="flat", padx=4)
+        self.btn_ping_rx = tk.Button(frm_rx_conn, text="IDENT / Ping", bg="#854d0e", fg="#ffffff",
+                                     font=("Segoe UI", 8, "bold"), command=self.ident_o_ping_rx, relief="flat", padx=4)
         self.btn_ping_rx.pack(side="left", padx=2)
 
-        self.badge_rx = tk.Label(frm_rx_conn, text="🔴 RX OFF", bg="#2a2e3f", fg="#f87171", font=("Segoe UI", 8, "bold"), padx=6)
+        self.badge_rx = tk.Label(frm_rx_conn, text="[RX OFF]", bg="#2a2e3f", fg="#f87171", font=("Segoe UI", 8, "bold"), padx=5)
         self.badge_rx.pack(side="left", padx=2)
 
-        btn_refrescar = tk.Button(top_bar, text="🔄 Puertos", bg="#334155", fg="#ffffff", font=("Segoe UI", 8, "bold"),
-                                  command=self.actualizar_lista_puertos, relief="flat", padx=6)
-        btn_refrescar.pack(side="left", padx=4)
+        btn_refrescar = tk.Button(row_conn, text="Refrescar Puertos", bg="#334155", fg="#ffffff", font=("Segoe UI", 8, "bold"),
+                                  command=self.actualizar_lista_puertos, relief="flat", padx=5)
+        btn_refrescar.pack(side="left", padx=3)
 
-        # Modo de Conducción
-        tk.Label(top_bar, text="Modo:", bg="#151824", fg="#cbd5e1", font=("Segoe UI", 9, "bold")).pack(side="left", padx=(8, 4))
-        self.cb_modo = ttk.Combobox(top_bar, width=12, textvariable=self.modo_conduccion,
+        # Insignia de Validacion Cruzada TX <-> RX a la derecha
+        self.badge_validacion = tk.Label(row_conn, text="[VALIDACION: EN ESPERA]", bg="#2a2e3f", fg="#94a3b8",
+                                         font=("Segoe UI", 9, "bold"), padx=8, pady=2)
+        self.badge_validacion.pack(side="right", padx=3)
+
+        # Modo de Conduccion
+        self.cb_modo = ttk.Combobox(row_conn, width=11, textvariable=self.modo_conduccion,
                                     values=["ACKERMANN", "CRAB", "MANUAL"], state="readonly")
-        self.cb_modo.pack(side="left", padx=2)
+        self.cb_modo.pack(side="right", padx=2)
         self.cb_modo.bind("<<ComboboxSelected>>", self.cambiar_modo_conduccion)
+        tk.Label(row_conn, text="Modo:", bg="#151824", fg="#cbd5e1", font=("Segoe UI", 9, "bold")).pack(side="right", padx=(6, 2))
 
-        # Insignia de Validación Cruzada TX <-> RX
-        self.badge_validacion = tk.Label(top_bar, text="⚡ VALIDACIÓN: EN ESPERA", bg="#2a2e3f", fg="#94a3b8",
-                                         font=("Segoe UI", 9, "bold"), padx=10, pady=2)
-        self.badge_validacion.pack(side="right", padx=5)
+        # --- FILA 2: APROVISIONAMIENTO Y DESPLIEGUE EN CAMPO ---
+        row_flash = ttk.Frame(top_bar, style="Card.TFrame")
+        row_flash.pack(fill="x", pady=(2, 0))
+
+        tk.Label(row_flash, text="BANCO DE PRUEBAS & DESPLIEGUE:", bg="#151824", fg="#cbd5e1",
+                 font=("Segoe UI", 8, "bold")).pack(side="left", padx=(0, 6))
+
+        self.btn_subir_tx = tk.Button(row_flash, text="Subir TX", bg="#0f766e", fg="#ffffff",
+                                      font=("Segoe UI", 8, "bold"), command=self.iniciar_flasheo_tx, relief="flat", padx=6)
+        self.btn_subir_tx.pack(side="left", padx=3)
+
+        self.btn_subir_rx = tk.Button(row_flash, text="Subir RX", bg="#854d0e", fg="#ffffff",
+                                      font=("Segoe UI", 8, "bold"), command=self.iniciar_flasheo_rx, relief="flat", padx=6)
+        self.btn_subir_rx.pack(side="left", padx=3)
+
+        ttk.Separator(row_flash, orient="vertical").pack(side="left", fill="y", padx=6)
+
+        self.btn_sync_calib = tk.Button(row_flash, text="Sincronizar Calibracion RX", bg="#1e3a8a", fg="#93c5fd",
+                                        font=("Segoe UI", 8, "bold"), command=self.sincronizar_calibracion_rx, relief="flat", padx=6)
+        self.btn_sync_calib.pack(side="left", padx=3)
+
+        self.btn_liberar_rx = tk.Button(row_flash, text="Liberar RX (Campo)", bg="#334155", fg="#38bdf8",
+                                        font=("Segoe UI", 8, "bold"), command=self.liberar_rx_campo, relief="flat", padx=6)
+        self.btn_liberar_rx.pack(side="left", padx=3)
 
         # =========================================================================
         # 2. CUERPO PRINCIPAL: IZQUIERDA (CONTROLES), DERECHA (DOBLE ESQUEMA 2D)
@@ -240,8 +323,8 @@ class HMIRoverDebug:
 
         frm_tit_m = ttk.Frame(card_motores, style="Card.TFrame")
         frm_tit_m.pack(fill="x", pady=(0, 2))
-        ttk.Label(frm_tit_m, text="⚙️ CALIBRACIÓN & TRIMS (RATIO % DE MASTER)", style="Header.TLabel").pack(side="left")
-        tk.Button(frm_tit_m, text="⟲ Reset (100%)", bg="#334155", fg="#00f5d4",
+        ttk.Label(frm_tit_m, text="CALIBRACION & TRIMS (RATIO % DE MASTER)", style="Header.TLabel").pack(side="left")
+        tk.Button(frm_tit_m, text="Reset (100%)", bg="#334155", fg="#00f5d4",
                   font=("Segoe UI", 7, "bold"), relief="flat", padx=5, pady=1, command=self.reset_trims).pack(side="right")
 
         grid_m = ttk.Frame(card_motores, style="Card.TFrame")
@@ -275,7 +358,7 @@ class HMIRoverDebug:
         card_servos = ttk.Frame(col_izq, style="Card.TFrame", padding=8)
         card_servos.pack(fill="x", pady=(0, 6))
 
-        self.lbl_header_servos = ttk.Label(card_servos, text="🎯 SERVOS DE DIRECCIÓN (10° - 170°)", style="Header.TLabel")
+        self.lbl_header_servos = ttk.Label(card_servos, text="SERVOS DE DIRECCION (10 deg - 170 deg)", style="Header.TLabel")
         self.lbl_header_servos.pack(anchor="w", pady=(0, 2))
         grid_s = ttk.Frame(card_servos, style="Card.TFrame")
         grid_s.pack(fill="x")
@@ -292,27 +375,28 @@ class HMIRoverDebug:
 
         frm_s_btns = ttk.Frame(card_servos, style="Card.TFrame")
         frm_s_btns.pack(fill="x", pady=(4, 0))
-        tk.Button(frm_s_btns, text="⌖ 90°", bg="#334155", fg="#ffffff", font=("Segoe UI", 8, "bold"),
+        tk.Button(frm_s_btns, text="90 deg", bg="#334155", fg="#ffffff", font=("Segoe UI", 8, "bold"),
                   command=self.centrar_todos_los_servos, relief="flat", padx=6).pack(side="left", padx=2)
-        tk.Button(frm_s_btns, text="🔄 Eje (360°)", bg="#334155", fg="#00f5d4", font=("Segoe UI", 8, "bold"),
+        tk.Button(frm_s_btns, text="Giro 360 deg", bg="#334155", fg="#00f5d4", font=("Segoe UI", 8, "bold"),
                   command=self.preset_point_turn, relief="flat", padx=6).pack(side="left", padx=2)
-        tk.Button(frm_s_btns, text="🦀 Cangrejo", bg="#334155", fg="#ff9f1c", font=("Segoe UI", 8, "bold"),
+        tk.Button(frm_s_btns, text="Cangrejo", bg="#334155", fg="#ff9f1c", font=("Segoe UI", 8, "bold"),
                   command=self.preset_cangrejo, relief="flat", padx=6).pack(side="left", padx=2)
+
         tk.Checkbutton(frm_s_btns, text="Invertir Servos", variable=self.invertir_servos,
                        bg="#151824", fg="#e2e8f0", selectcolor="#0c0e17", font=("Segoe UI", 8),
                        command=self.al_cambiar_inversion_servos).pack(side="right", padx=(4, 0))
-        tk.Checkbutton(frm_s_btns, text="Servos 360°", variable=self.servos_360,
+        tk.Checkbutton(frm_s_btns, text="Servos 360 deg", variable=self.servos_360,
                        bg="#151824", fg="#00f5d4", selectcolor="#0c0e17", font=("Segoe UI", 8, "bold"),
                        command=self.actualizar_rango_servos).pack(side="right", padx=(4, 0))
 
-        # --- PANEL JOYSTICK FÍSICO (NANO) ---
+        # --- PANEL JOYSTICK FISICO (NANO) ---
         card_joy = ttk.Frame(col_izq, style="Card.TFrame", padding=8)
         card_joy.pack(fill="x", pady=(0, 6))
 
         frm_joy_top = ttk.Frame(card_joy, style="Card.TFrame")
         frm_joy_top.pack(fill="x", pady=(0, 4))
 
-        ttk.Label(frm_joy_top, text="🎮 JOYSTICK (NANO):", style="Header.TLabel").pack(side="left", padx=(0, 4))
+        ttk.Label(frm_joy_top, text="JOYSTICK (NANO):", style="Header.TLabel").pack(side="left", padx=(0, 4))
         self.cb_puertos_joy = ttk.Combobox(frm_joy_top, width=8, state="readonly")
         self.cb_puertos_joy.pack(side="left", padx=2)
 
@@ -320,7 +404,7 @@ class HMIRoverDebug:
                                           font=("Segoe UI", 8, "bold"), command=self.toggle_conexion_joy, relief="flat", padx=5)
         self.btn_conectar_joy.pack(side="left", padx=3)
 
-        self.lbl_badge_joy = tk.Label(frm_joy_top, text="🔴 OFF", bg="#2a2e3f", fg="#f87171",
+        self.lbl_badge_joy = tk.Label(frm_joy_top, text="[OFF]", bg="#2a2e3f", fg="#f87171",
                                       font=("Segoe UI", 8, "bold"), padx=6, pady=1)
         self.lbl_badge_joy.pack(side="left", padx=3)
 
@@ -350,7 +434,7 @@ class HMIRoverDebug:
         frm_joy_ctrls = ttk.Frame(frm_joy_body, style="Card.TFrame")
         frm_joy_ctrls.pack(side="left", fill="both", expand=True)
 
-        ttk.Label(frm_joy_ctrls, text="POTENCIÓMETRO:", font=("Segoe UI", 8, "bold"), style="SubHeader.TLabel").pack(anchor="w")
+        ttk.Label(frm_joy_ctrls, text="POTENCIOMETRO:", font=("Segoe UI", 8, "bold"), style="SubHeader.TLabel").pack(anchor="w")
         self.lbl_joy_pot = ttk.Label(frm_joy_ctrls, text="Pot: 150 / 255 (59%)", style="Value.TLabel")
         self.lbl_joy_pot.pack(anchor="w", pady=(0, 2))
 
@@ -360,16 +444,16 @@ class HMIRoverDebug:
         self.badge_btn_modo = tk.Label(frm_badges, text="MODO", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
         self.badge_btn_modo.pack(side="left", padx=1)
 
-        self.badge_btn_centrar = tk.Label(frm_badges, text="90°", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
+        self.badge_btn_centrar = tk.Label(frm_badges, text="90 deg", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
         self.badge_btn_centrar.pack(side="left", padx=1)
 
-        self.badge_btn_360 = tk.Label(frm_badges, text="360°", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
+        self.badge_btn_360 = tk.Label(frm_badges, text="360 deg", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
         self.badge_btn_360.pack(side="left", padx=1)
 
-        self.badge_btn_q = tk.Label(frm_badges, text="↺ Q", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
+        self.badge_btn_q = tk.Label(frm_badges, text="Q", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
         self.badge_btn_q.pack(side="left", padx=1)
 
-        self.badge_btn_e = tk.Label(frm_badges, text="↻ E", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
+        self.badge_btn_e = tk.Label(frm_badges, text="E", bg="#334155", fg="#94a3b8", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
         self.badge_btn_e.pack(side="left", padx=1)
 
         self.badge_btn_estop = tk.Label(frm_badges, text="ESTOP", bg="#334155", fg="#f87171", font=("Segoe UI", 7, "bold"), padx=3, pady=1)
@@ -382,7 +466,7 @@ class HMIRoverDebug:
         card_dual_esquema = ttk.Frame(col_der, style="Card.TFrame", padding=8)
         card_dual_esquema.pack(fill="x", pady=(0, 6))
 
-        ttk.Label(card_dual_esquema, text="🛰️ DOBLE COMPARADOR VISUAL ROCKER-BOGIE (TX vs RX)", style="Header.TLabel").pack(anchor="w", pady=(0, 4))
+        ttk.Label(card_dual_esquema, text="DOBLE COMPARADOR VISUAL ROCKER-BOGIE (TX vs RX)", style="Header.TLabel").pack(anchor="w", pady=(0, 4))
 
         frm_canvases = ttk.Frame(card_dual_esquema, style="Card.TFrame")
         frm_canvases.pack(fill="x")
@@ -399,7 +483,7 @@ class HMIRoverDebug:
         # Canvas RX
         frm_c_rx = ttk.Frame(frm_canvases, style="CardDark.TFrame", padding=4)
         frm_c_rx.pack(side="right", fill="both", expand=True, padx=(4, 0))
-        tk.Label(frm_c_rx, text="2. TELEMETRÍA RECIBIDA MKR (RX)", bg="#11131c", fg="#fbbf24", font=("Segoe UI", 8, "bold")).pack(anchor="center")
+        tk.Label(frm_c_rx, text="2. TELEMETRIA RECIBIDA (RX)", bg="#11131c", fg="#fbbf24", font=("Segoe UI", 8, "bold")).pack(anchor="center")
         self.canvas_rx = tk.Canvas(frm_c_rx, width=175, height=175, bg="#08090f", highlightthickness=1, highlightbackground="#fbbf24")
         self.canvas_rx.pack(anchor="center", pady=2)
         self.lbl_rx_valores = tk.Label(frm_c_rx, text="Izq: -- | Der: -- | S:[--,--,--,--]", bg="#11131c", fg="#94a3b8", font=("Consolas", 8))
@@ -412,31 +496,31 @@ class HMIRoverDebug:
         grid_botones = ttk.Frame(frm_mandos, style="Card.TFrame")
         grid_botones.pack(anchor="center")
 
-        self.btn_q = tk.Button(grid_botones, text="↺ Q", width=6, height=2, bg="#334155", fg="#00f5d4",
+        self.btn_q = tk.Button(grid_botones, text="Q", width=6, height=2, bg="#334155", fg="#00f5d4",
                                font=("Segoe UI", 8, "bold"), relief="flat", command=lambda: self.activar_macro("PIVOT_IZQ"))
         self.btn_q.grid(row=0, column=0, padx=2, pady=2)
 
-        self.btn_w = tk.Button(grid_botones, text="▲ W", width=8, height=2, bg="#334155", fg="#ffffff",
+        self.btn_w = tk.Button(grid_botones, text="W", width=8, height=2, bg="#334155", fg="#ffffff",
                                font=("Segoe UI", 8, "bold"), relief="flat")
         self.btn_w.grid(row=0, column=1, padx=2, pady=2)
 
-        self.btn_e = tk.Button(grid_botones, text="↻ E", width=6, height=2, bg="#334155", fg="#00f5d4",
+        self.btn_e = tk.Button(grid_botones, text="E", width=6, height=2, bg="#334155", fg="#00f5d4",
                                font=("Segoe UI", 8, "bold"), relief="flat", command=lambda: self.activar_macro("PIVOT_DER"))
         self.btn_e.grid(row=0, column=2, padx=2, pady=2)
 
-        self.btn_a = tk.Button(grid_botones, text="◄ A", width=6, height=2, bg="#334155", fg="#ffffff",
+        self.btn_a = tk.Button(grid_botones, text="A", width=6, height=2, bg="#334155", fg="#ffffff",
                                font=("Segoe UI", 8, "bold"), relief="flat")
         self.btn_a.grid(row=1, column=0, padx=2, pady=2)
 
-        self.btn_stop = tk.Button(grid_botones, text="■ STOP", width=8, height=2, bg="#e63946", fg="#ffffff",
+        self.btn_stop = tk.Button(grid_botones, text="STOP", width=8, height=2, bg="#e63946", fg="#ffffff",
                                   font=("Segoe UI", 8, "bold"), relief="flat", command=self.parar_emergencia)
         self.btn_stop.grid(row=1, column=1, padx=2, pady=2)
 
-        self.btn_d = tk.Button(grid_botones, text="D ►", width=6, height=2, bg="#334155", fg="#ffffff",
+        self.btn_d = tk.Button(grid_botones, text="D", width=6, height=2, bg="#334155", fg="#ffffff",
                                font=("Segoe UI", 8, "bold"), relief="flat")
         self.btn_d.grid(row=1, column=2, padx=2, pady=2)
 
-        self.btn_s = tk.Button(grid_botones, text="▼ S", width=8, height=2, bg="#334155", fg="#ffffff",
+        self.btn_s = tk.Button(grid_botones, text="S", width=8, height=2, bg="#334155", fg="#ffffff",
                                font=("Segoe UI", 8, "bold"), relief="flat")
         self.btn_s.grid(row=2, column=1, padx=2, pady=2)
 
@@ -454,7 +538,7 @@ class HMIRoverDebug:
         self.lbl_met_tot_tx = ttk.Label(grid_met, text="0", style="Value.TLabel")
         self.lbl_met_tot_tx.grid(row=0, column=3, sticky="w", padx=(4, 15))
 
-        ttk.Label(grid_met, text="Paquetes MKR:", style="SubHeader.TLabel").grid(row=0, column=4, sticky="w")
+        ttk.Label(grid_met, text="Paquetes RX:", style="SubHeader.TLabel").grid(row=0, column=4, sticky="w")
         self.lbl_met_tot_rx = ttk.Label(grid_met, text="0", style="ValueWarn.TLabel")
         self.lbl_met_tot_rx.grid(row=0, column=5, sticky="w", padx=4)
 
@@ -479,20 +563,20 @@ class HMIRoverDebug:
         frm_tit_cons = ttk.Frame(card_consola, style="Card.TFrame")
         frm_tit_cons.pack(fill="x", pady=(0, 2))
 
-        ttk.Label(frm_tit_cons, text="🔍 MONITOR MULTI-CANAL DE DEPURACIÓN (TX / RX / VALIDACIÓN)", style="Header.TLabel").pack(side="left")
+        ttk.Label(frm_tit_cons, text="MONITOR MULTI-CANAL DE DEPURACION (TX / RX / VALIDACION)", style="Header.TLabel").pack(side="left")
 
         tk.Checkbutton(frm_tit_cons, text="Ver Hex TX", variable=self.mostrar_hex,
                        bg="#151824", fg="#94a3b8", selectcolor="#0c0e17", font=("Segoe UI", 8)).pack(side="left", padx=(15, 3))
-        tk.Checkbutton(frm_tit_cons, text="Ver ESP32", variable=self.mostrar_raw_esp,
+        tk.Checkbutton(frm_tit_cons, text="Ver TX RAW", variable=self.mostrar_raw_esp,
                        bg="#151824", fg="#94a3b8", selectcolor="#0c0e17", font=("Segoe UI", 8)).pack(side="left", padx=3)
-        tk.Checkbutton(frm_tit_cons, text="Ver MKR", variable=self.mostrar_raw_mkr,
+        tk.Checkbutton(frm_tit_cons, text="Ver RX RAW", variable=self.mostrar_raw_mkr,
                        bg="#151824", fg="#94a3b8", selectcolor="#0c0e17", font=("Segoe UI", 8)).pack(side="left", padx=3)
         tk.Checkbutton(frm_tit_cons, text="TX Continuo", variable=self.tx_continuo,
                        bg="#151824", fg="#00f5d4", selectcolor="#0c0e17", font=("Segoe UI", 8)).pack(side="left", padx=3)
         tk.Checkbutton(frm_tit_cons, text="AutoScroll", variable=self.auto_scroll,
                        bg="#151824", fg="#94a3b8", selectcolor="#0c0e17", font=("Segoe UI", 8)).pack(side="left", padx=3)
 
-        tk.Button(frm_tit_cons, text="💾 Guardar Log", bg="#334155", fg="#ffffff", font=("Segoe UI", 7, "bold"),
+        tk.Button(frm_tit_cons, text="Guardar Log", bg="#334155", fg="#ffffff", font=("Segoe UI", 7, "bold"),
                   command=self.guardar_log_archivo, relief="flat", padx=6).pack(side="right", padx=2)
         tk.Button(frm_tit_cons, text="Limpiar", bg="#334155", fg="#ffffff", font=("Segoe UI", 7, "bold"),
                   command=self.limpiar_consola, relief="flat", padx=6).pack(side="right", padx=2)
@@ -510,21 +594,21 @@ class HMIRoverDebug:
         scroll_y.config(command=self.txt_consola.yview)
 
         # Tags de color para claridad visual
-        self.txt_consola.tag_config("TAG_TX", foreground="#00f5d4")        # Cyan: Salida PC -> ESP32
-        self.txt_consola.tag_config("TAG_ESP", foreground="#38b000")       # Verde: Logs ESP32
-        self.txt_consola.tag_config("TAG_MKR", foreground="#fbbf24")       # Amarillo: Logs MKR 1310
+        self.txt_consola.tag_config("TAG_TX", foreground="#00f5d4")        # Cyan: Salida PC -> TX
+        self.txt_consola.tag_config("TAG_ESP", foreground="#38b000")       # Verde: Logs TX Firmware
+        self.txt_consola.tag_config("TAG_MKR", foreground="#fbbf24")       # Amarillo: Logs RX Firmware
         self.txt_consola.tag_config("TAG_MATCH", foreground="#34d399")     # Verde brillante: Match 1:1
         self.txt_consola.tag_config("TAG_MISMATCH", foreground="#f87171")  # Rojo: Discrepancia
         self.txt_consola.tag_config("TAG_WARN", foreground="#fb923c")      # Naranja: Alertas
         self.txt_consola.tag_config("TAG_SYS", foreground="#94a3b8")       # Gris: Sistema
 
-        # Volcar logs que se hayan generado antes de crear el widget
+        # Volcar logs previos
         if hasattr(self, '_log_buffer') and self._log_buffer:
             for tag, msg in self._log_buffer:
                 self.log_consola(tag, msg)
             self._log_buffer.clear()
 
-        self.log_consola("SYS", "HMI Rover Debug cargado. Conecte los puertos COM de Transmisor (ESP32) y/o Receptor (MKR / Nano ESP32).")
+        self.log_consola("SYS", "HMI Rover Debug cargado. Conecte los puertos COM de Transmisor (TX) y/o Receptor (RX).")
         self.actualizar_lista_puertos()
 
     def crear_slider(self, parent, nombre, variable, desde, hasta, callback=None):
@@ -540,7 +624,7 @@ class HMIRoverDebug:
         frm = ttk.Frame(parent, style="Card.TFrame")
         frm.pack(fill="x", pady=1)
 
-        rango_str = "0°-360°" if self.servos_360.get() else "10°-170°"
+        rango_str = "0-360 deg" if self.servos_360.get() else "10-170 deg"
         lbl = ttk.Label(frm, text=f"{nombre} ({rango_str})", style="SubHeader.TLabel")
         lbl.pack(anchor="w")
 
@@ -555,10 +639,10 @@ class HMIRoverDebug:
         es_360 = self.servos_360.get()
         desde = 0 if es_360 else 10
         hasta = 360 if es_360 else 170
-        rango_str = "0°-360°" if es_360 else "10°-170°"
+        rango_str = "0-360 deg" if es_360 else "10-170 deg"
 
-        if hasattr(self, 'lbl_header_servos'):
-            self.lbl_header_servos.config(text=f"🎯 SERVOS DE DIRECCIÓN ({rango_str})")
+        if hasattr(self, 'lbl_header_servos') and self.lbl_header_servos is not None:
+            self.lbl_header_servos.config(text=f"SERVOS DE DIRECCION ({rango_str})")
 
         for idx, (lbl, s, nombre) in self.sliders_servos.items():
             s.config(from_=desde, to=hasta)
@@ -576,14 +660,14 @@ class HMIRoverDebug:
         else:
             self.actualizar_grafico_tx()
 
-        estado_txt = "360° (Continuo/Extendido)" if es_360 else "Estándar (10°-170° Seguro)"
+        estado_txt = "360 deg (Continuo/Extendido)" if es_360 else "Estandar (10-170 deg Seguro)"
         self.log_consola("SYS", f"Rango de Servos cambiado a: {estado_txt}")
 
     def crear_slider_trim(self, parent, motor_idx, nombre, variable):
         frm = ttk.Frame(parent, style="Card.TFrame")
         frm.pack(fill="x", pady=2)
 
-        lbl = ttk.Label(frm, text=f"{nombre} [100% ➔ PWM: 150]", style="SubHeader.TLabel")
+        lbl = ttk.Label(frm, text=f"{nombre} [100% -> PWM: 150]", style="SubHeader.TLabel")
         lbl.pack(anchor="w")
         self.lbl_trims[motor_idx] = (lbl, nombre)
 
@@ -612,7 +696,7 @@ class HMIRoverDebug:
                 lbl, nombre = self.lbl_trims[idx]
                 trim = getattr(self, f"trim_m{idx}").get()
                 pwm = self.get_pwm_motor(idx)
-                lbl.config(text=f"{nombre} [{trim}% ➔ PWM: {pwm}]")
+                lbl.config(text=f"{nombre} [{trim}% -> PWM: {pwm}]")
 
     def reset_trims(self):
         for i in range(1, 7):
@@ -656,14 +740,15 @@ class HMIRoverDebug:
         else:
             return [0, 0, 0, 0, 0, 0]
 
-
     # =========================================================================
-    # COMUNICACION PUERTO 1 (TX ESP32) Y PUERTO 2 (RX MKR 1310)
+    # COMUNICACION PUERTO 1 (TX) Y PUERTO 2 (RX)
     # =========================================================================
     def actualizar_lista_puertos(self):
         if not SERIAL_DISPONIBLE:
-            self.cb_puerto_tx['values'] = ["Sin pyserial"]
-            self.cb_puerto_rx['values'] = ["Sin pyserial"]
+            if hasattr(self, 'cb_puerto_tx'):
+                self.cb_puerto_tx['values'] = ["Sin pyserial"]
+            if hasattr(self, 'cb_puerto_rx'):
+                self.cb_puerto_rx['values'] = ["Sin pyserial"]
             if hasattr(self, 'cb_puertos_joy'):
                 self.cb_puertos_joy['values'] = ["Sin pyserial"]
             return
@@ -671,12 +756,19 @@ class HMIRoverDebug:
         com_list = list(serial.tools.list_ports.comports())
         puertos = [p.device for p in com_list]
         if puertos:
-            self.cb_puerto_tx['values'] = puertos
-            self.cb_puerto_rx['values'] = puertos
+            if hasattr(self, 'cb_puerto_tx'):
+                self.cb_puerto_tx['values'] = puertos
+            if hasattr(self, 'cb_puerto_rx'):
+                self.cb_puerto_rx['values'] = puertos
             if hasattr(self, 'cb_puertos_joy'):
                 self.cb_puertos_joy['values'] = puertos
 
-            # Detección inteligente de chips USB-Serie conocidos
+            # Deteccion pasiva de perfiles de hardware soportados
+            for p in com_list:
+                perf = self.registry.detectar_perfil(p)
+                if perf:
+                    self.log_consola("SYS", f"[AUTODETECCION] Puerto {p.device} coincide con perfil: {perf.nombre} ({perf.id})")
+
             chips_conocidos = ['ch340', 'cp210', 'ftdi', 'usb-serial', 'arduino', 'esp32', 'silicon labs', 'usb serial']
             puertos_detectados = []
             for p in com_list:
@@ -686,15 +778,17 @@ class HMIRoverDebug:
 
             orden_puertos = puertos_detectados + [pt for pt in puertos if pt not in puertos_detectados]
 
-            # Puerto TX (ESP32 Transmisor)
-            if not self.cb_puerto_tx.get() or self.cb_puerto_tx.get() not in puertos:
-                self.cb_puerto_tx.set(orden_puertos[0])
+            # Puerto TX (Transmisor)
+            if hasattr(self, 'cb_puerto_tx'):
+                if not self.cb_puerto_tx.get() or self.cb_puerto_tx.get() not in puertos:
+                    self.cb_puerto_tx.set(orden_puertos[0])
 
-            # Puerto RX (MKR / Nano ESP32 Receptor)
-            if len(orden_puertos) > 1 and (not self.cb_puerto_rx.get() or self.cb_puerto_rx.get() not in puertos):
-                self.cb_puerto_rx.set(orden_puertos[1])
-            elif not self.cb_puerto_rx.get() or self.cb_puerto_rx.get() not in puertos:
-                self.cb_puerto_rx.set(orden_puertos[0])
+            # Puerto RX (Receptor)
+            if hasattr(self, 'cb_puerto_rx'):
+                if len(orden_puertos) > 1 and (not self.cb_puerto_rx.get() or self.cb_puerto_rx.get() not in puertos):
+                    self.cb_puerto_rx.set(orden_puertos[1])
+                elif not self.cb_puerto_rx.get() or self.cb_puerto_rx.get() not in puertos:
+                    self.cb_puerto_rx.set(orden_puertos[0])
 
             # Puerto Mando Joystick (si existe)
             if hasattr(self, 'cb_puertos_joy'):
@@ -705,16 +799,52 @@ class HMIRoverDebug:
                 elif not self.cb_puertos_joy.get() or self.cb_puertos_joy.get() not in puertos:
                     self.cb_puertos_joy.set(orden_puertos[0])
 
-            self.log_consola("SYS", f"Puertos COM escaneados: {', '.join(puertos)} | Preseleccionado TX: {self.cb_puerto_tx.get()}")
+            # Autodeteccion pasiva para los puertos preseleccionados
+            if hasattr(self, 'cb_puerto_tx') and self.cb_puerto_tx.get():
+                self.autodetectar_perfil_puerto(self.cb_puerto_tx.get(), "TX")
+            if hasattr(self, 'cb_puerto_rx') and self.cb_puerto_rx.get():
+                self.autodetectar_perfil_puerto(self.cb_puerto_rx.get(), "RX")
+
+            self.log_consola("SYS", f"Puertos COM escaneados: {', '.join(puertos)} | Preseleccionado TX: {self.cb_puerto_tx.get() if hasattr(self, 'cb_puerto_tx') else ''}")
         else:
-            self.cb_puerto_tx['values'] = ["Sin puertos"]
-            self.cb_puerto_rx['values'] = ["Sin puertos"]
+            if hasattr(self, 'cb_puerto_tx'):
+                self.cb_puerto_tx['values'] = ["Sin puertos"]
+            if hasattr(self, 'cb_puerto_rx'):
+                self.cb_puerto_rx['values'] = ["Sin puertos"]
             if hasattr(self, 'cb_puertos_joy'):
                 self.cb_puertos_joy['values'] = ["Sin puertos"]
 
+    def al_seleccionar_puerto_tx(self, event=None):
+        puerto = self.cb_puerto_tx.get()
+        self.autodetectar_perfil_puerto(puerto, "TX")
+
+    def al_seleccionar_puerto_rx(self, event=None):
+        puerto = self.cb_puerto_rx.get()
+        self.autodetectar_perfil_puerto(puerto, "RX")
+
+    def autodetectar_perfil_puerto(self, nombre_puerto, rol):
+        """Asigna automaticamente el perfil si coincide el VID:PID por USB."""
+        if not SERIAL_DISPONIBLE or not nombre_puerto:
+            return
+        try:
+            com_list = list(serial.tools.list_ports.comports())
+            for p in com_list:
+                if p.device == nombre_puerto:
+                    perfil = self.registry.detectar_perfil(p)
+                    if perfil:
+                        if rol == "TX":
+                            self.perfil_tx.set(perfil.id)
+                        else:
+                            self.perfil_rx.set(perfil.id)
+                        self.log_consola("SYS", f"[AUTODETECCION {rol}] Perfil asignado automaticamente: {perfil.nombre} ({perfil.id})")
+                    break
+        except Exception:
+            pass
+
     def toggle_conexion_tx(self):
         if not SERIAL_DISPONIBLE:
-            messagebox.showerror("Error", "pyserial no instalado.")
+            if messagebox:
+                messagebox.showerror("Error", "pyserial no instalado.")
             return
 
         if self.conectado_tx:
@@ -722,15 +852,16 @@ class HMIRoverDebug:
             if self.serial_tx and self.serial_tx.is_open:
                 try:
                     self.serial_tx.close()
-                except:
+                except Exception:
                     pass
             self.btn_conectar_tx.config(text="Conectar TX", bg="#00f5d4", fg="#0c0e17")
-            self.badge_tx.config(text="🔴 TX OFF", bg="#2a2e3f", fg="#f87171")
-            self.log_consola("SYS", "Puerto TX (ESP32) desconectado.")
+            self.badge_tx.config(text="[TX OFF]", bg="#2a2e3f", fg="#f87171")
+            self.log_consola("SYS", "Puerto TX desconectado.")
         else:
             p = self.cb_puerto_tx.get()
-            if not p or p == "Sin puertos":
-                messagebox.showwarning("Atención", "Seleccione un puerto válido para TX.")
+            if not p or p in ["Sin puertos", "Sin pyserial"]:
+                if messagebox:
+                    messagebox.showwarning("Atencion", "Seleccione un puerto valido para TX.")
                 return
             try:
                 self.serial_tx = serial.Serial()
@@ -738,53 +869,60 @@ class HMIRoverDebug:
                 self.serial_tx.baudrate = 115200
                 self.serial_tx.timeout = 0.05
                 self.serial_tx.write_timeout = 0.2
-                # RTS=False previene que el ESP32 entre en modo ROM Bootloader por GPIO9
                 self.serial_tx.rts = False
                 self.serial_tx.dtr = False
                 self.serial_tx.open()
                 time.sleep(0.15)
-                # DTR=True indica terminal lista al controlador USB CDC del ESP32-C3
                 self.serial_tx.dtr = True
                 self.conectado_tx = True
                 self.btn_conectar_tx.config(text="Desconectar TX", bg="#e63946", fg="#ffffff")
-                self.badge_tx.config(text=f"🟢 {p}", bg="#064e3b", fg="#34d399")
-                self.log_consola("SYS", f"Transmisor ESP32 conectado en {p} @ 115200 bps (DTR=ON, RTS=OFF).")
-                # Auto-ping inmediato tras 300 ms
-                self.root.after(300, self.ping_tx)
+                self.badge_tx.config(text=f"[TX ON] {p}", bg="#064e3b", fg="#34d399")
+                self.log_consola("SYS", f"Transmisor TX conectado en {p} @ 115200 bps (DTR=ON, RTS=OFF).")
+                # Auto-identificacion activa tras 300 ms
+                self.root.after(300, self.ident_o_ping_tx)
             except Exception as e:
                 self.conectado_tx = False
-                messagebox.showerror("Error TX", f"No se pudo conectar a {p}:\n{e}")
+                if messagebox:
+                    messagebox.showerror("Error TX", f"No se pudo conectar a {p}:\n{e}")
 
-    def ping_tx(self):
+    def ident_o_ping_tx(self):
+        """Envia comando IDENT y PING al transmisor para handshake activo y confirmacion."""
         if self.conectado_tx and self.serial_tx and self.serial_tx.is_open:
             try:
-                self.serial_tx.write(b"PING\n")
-                self.log_consola("TX", "[DIAGNOSTICO] Enviado comando 'PING' a ESP32...")
+                self.serial_tx.write(b"IDENT\n")
+                self.serial_tx.flush()
+                self.log_consola("TX", "[DIAGNOSTICO] Enviado comando 'IDENT' a TX...")
             except Exception as e:
-                self.log_consola("WARN", f"Error enviando PING a ESP32: {e}")
+                self.log_consola("WARN", f"Error enviando IDENT a TX: {e}")
         else:
-            messagebox.showinfo("Ping TX", "Conecte primero el puerto TX (ESP32).")
+            if messagebox:
+                messagebox.showinfo("IDENT TX", "Conecte primero el puerto TX.")
+
+    def ping_tx(self):
+        self.ident_o_ping_tx()
 
     def reset_hw_tx(self):
         if self.conectado_tx and self.serial_tx and self.serial_tx.is_open:
             try:
-                self.log_consola("SYS", "[RESET] Enviando pulso de reinicio por hardware a ESP32...")
+                self.log_consola("SYS", "[RESET] Enviando pulso de reinicio por hardware a TX...")
                 self.serial_tx.dtr = False
                 self.serial_tx.rts = True
                 time.sleep(0.1)
                 self.serial_tx.rts = False
                 time.sleep(0.15)
                 self.serial_tx.dtr = True
-                self.log_consola("SYS", "[RESET] ESP32 liberado. Esperando arranque...")
-                self.root.after(1000, self.ping_tx)
+                self.log_consola("SYS", "[RESET] TX liberado. Esperando arranque...")
+                self.root.after(1000, self.ident_o_ping_tx)
             except Exception as e:
-                self.log_consola("WARN", f"Error reiniciando ESP32: {e}")
+                self.log_consola("WARN", f"Error reiniciando TX: {e}")
         else:
-            messagebox.showinfo("Reset TX", "Conecte primero el puerto TX (ESP32).")
+            if messagebox:
+                messagebox.showinfo("Reset TX", "Conecte primero el puerto TX.")
 
     def toggle_conexion_rx(self):
         if not SERIAL_DISPONIBLE:
-            messagebox.showerror("Error", "pyserial no instalado.")
+            if messagebox:
+                messagebox.showerror("Error", "pyserial no instalado.")
             return
 
         if self.conectado_rx:
@@ -792,15 +930,16 @@ class HMIRoverDebug:
             if self.serial_rx and self.serial_rx.is_open:
                 try:
                     self.serial_rx.close()
-                except:
+                except Exception:
                     pass
             self.btn_conectar_rx.config(text="Conectar RX", bg="#fbbf24", fg="#0c0e17")
-            self.badge_rx.config(text="🔴 RX OFF", bg="#2a2e3f", fg="#f87171")
-            self.log_consola("SYS", "Puerto RX (MKR 1310) desconectado.")
+            self.badge_rx.config(text="[RX OFF]", bg="#2a2e3f", fg="#f87171")
+            self.log_consola("SYS", "Puerto RX desconectado.")
         else:
             p = self.cb_puerto_rx.get()
-            if not p or p == "Sin puertos":
-                messagebox.showwarning("Atención", "Seleccione un puerto válido para RX.")
+            if not p or p in ["Sin puertos", "Sin pyserial"]:
+                if messagebox:
+                    messagebox.showwarning("Atencion", "Seleccione un puerto valido para RX.")
                 return
             try:
                 self.serial_rx = serial.Serial()
@@ -814,22 +953,219 @@ class HMIRoverDebug:
                 time.sleep(0.15)
                 self.conectado_rx = True
                 self.btn_conectar_rx.config(text="Desconectar RX", bg="#e63946", fg="#ffffff")
-                self.badge_rx.config(text=f"🟢 {p}", bg="#451a03", fg="#fbbf24")
-                self.log_consola("SYS", f"Receptor MKR 1310 conectado en {p} @ 115200 bps.")
-                self.root.after(300, self.ping_rx)
+                self.badge_rx.config(text=f"[RX ON] {p}", bg="#451a03", fg="#fbbf24")
+                self.log_consola("SYS", f"Receptor RX conectado en {p} @ 115200 bps.")
+                self.root.after(300, self.ident_o_ping_rx)
             except Exception as e:
                 self.conectado_rx = False
-                messagebox.showerror("Error RX", f"No se pudo conectar a {p}:\n{e}")
+                if messagebox:
+                    messagebox.showerror("Error RX", f"No se pudo conectar a {p}:\n{e}")
 
-    def ping_rx(self):
+    def ident_o_ping_rx(self):
+        """Envia comando IDENT y PING al receptor para handshake activo y confirmacion."""
         if self.conectado_rx and self.serial_rx and self.serial_rx.is_open:
             try:
-                self.serial_rx.write(b"PING\n")
-                self.log_consola("MKR", "[DIAGNOSTICO] Enviado comando 'PING' a MKR 1310...")
+                self.serial_rx.write(b"IDENT\n")
+                self.serial_rx.flush()
+                self.log_consola("MKR", "[DIAGNOSTICO] Enviado comando 'IDENT' a RX...")
             except Exception as e:
-                self.log_consola("WARN", f"Error enviando PING a MKR: {e}")
+                self.log_consola("WARN", f"Error enviando IDENT a RX: {e}")
         else:
-            messagebox.showinfo("Ping RX", "Conecte primero el puerto RX (MKR 1310).")
+            if messagebox:
+                messagebox.showinfo("IDENT RX", "Conecte primero el puerto RX.")
+
+    def ping_rx(self):
+        self.ident_o_ping_rx()
+
+    # =========================================================================
+    # APROVISIONAMIENTO Y FLASHEO EN 1 CLIC (NO BLOQUEANTE)
+    # =========================================================================
+    def iniciar_flasheo_tx(self):
+        if self.flasheando:
+            if messagebox:
+                messagebox.showwarning("Flasheo en curso", "Ya hay una operacion de subida en ejecucion.")
+            return
+        puerto = self.cb_puerto_tx.get()
+        if not puerto or puerto in ["Sin puertos", "Sin pyserial"]:
+            if messagebox:
+                messagebox.showwarning("Atencion", "Seleccione un puerto COM valido para TX.")
+            return
+        perfil_id = self.perfil_tx.get()
+        try:
+            perfil = self.registry.obtener_perfil(perfil_id)
+        except KeyError:
+            perfil = self.registry.perfil_default
+
+        hilo = threading.Thread(target=self._ejecutar_flasheo, args=(puerto, perfil, "TX"), daemon=True)
+        hilo.start()
+
+    def iniciar_flasheo_rx(self):
+        if self.flasheando:
+            if messagebox:
+                messagebox.showwarning("Flasheo en curso", "Ya hay una operacion de subida en ejecucion.")
+            return
+        puerto = self.cb_puerto_rx.get()
+        if not puerto or puerto in ["Sin puertos", "Sin pyserial"]:
+            if messagebox:
+                messagebox.showwarning("Atencion", "Seleccione un puerto COM valido para RX.")
+            return
+        perfil_id = self.perfil_rx.get()
+        try:
+            perfil = self.registry.obtener_perfil(perfil_id)
+        except KeyError:
+            perfil = self.registry.perfil_default
+
+        hilo = threading.Thread(target=self._ejecutar_flasheo, args=(puerto, perfil, "RX"), daemon=True)
+        hilo.start()
+
+    def _ejecutar_flasheo(self, puerto, perfil, rol):
+        self.flasheando = True
+        rol_tx = (rol == "TX")
+        estaba_conectado = self.conectado_tx if rol_tx else self.conectado_rx
+
+        if estaba_conectado:
+            self.root.after(0, self.log_consola, "SYS", f"[SYS] Cerrando puerto {puerto} temporalmente para flasheo de {rol}...")
+            if rol_tx:
+                self.conectado_tx = False
+                if self.serial_tx and self.serial_tx.is_open:
+                    try:
+                        self.serial_tx.close()
+                    except Exception:
+                        pass
+                self.root.after(0, lambda: self.badge_tx.config(text="[TX FLASHEANDO]", bg="#78350f", fg="#fde047"))
+                self.root.after(0, lambda: self.btn_conectar_tx.config(text="Conectar TX", bg="#00f5d4", fg="#0c0e17"))
+            else:
+                self.conectado_rx = False
+                if self.serial_rx and self.serial_rx.is_open:
+                    try:
+                        self.serial_rx.close()
+                    except Exception:
+                        pass
+                self.root.after(0, lambda: self.badge_rx.config(text="[RX FLASHEANDO]", bg="#78350f", fg="#fde047"))
+                self.root.after(0, lambda: self.btn_conectar_rx.config(text="Conectar RX", bg="#fbbf24", fg="#0c0e17"))
+
+        time.sleep(0.3)
+        self.root.after(0, self.log_consola, "SYS", f"[SYS] Iniciando subida de firmware para {rol} ({perfil.nombre}) en {puerto}...")
+
+        def cb_log(msg):
+            self.root.after(0, self.log_consola, "SYS", msg)
+
+        try:
+            exito = self.flasher_engine.flashear(
+                puerto=puerto,
+                perfil=perfil,
+                rol=rol,
+                callback_log=cb_log,
+            )
+            if exito:
+                self.root.after(0, self.log_consola, "SYS", f"[OK] Subida de firmware {rol} completada exitosamente.")
+                if rol_tx:
+                    self.root.after(0, lambda: self.badge_tx.config(text="[TX FLASHEADO OK]", bg="#064e3b", fg="#34d399"))
+                else:
+                    self.root.after(0, lambda: self.badge_rx.config(text="[RX FLASHEADO OK]", bg="#064e3b", fg="#34d399"))
+            else:
+                self.root.after(0, self.log_consola, "WARN", f"[ERROR] Fallo en la subida de firmware {rol}.")
+                if rol_tx:
+                    self.root.after(0, lambda: self.badge_tx.config(text="[TX ERROR FLASH]", bg="#450a0a", fg="#f87171"))
+                else:
+                    self.root.after(0, lambda: self.badge_rx.config(text="[RX ERROR FLASH]", bg="#450a0a", fg="#f87171"))
+        except Exception as e:
+            self.root.after(0, self.log_consola, "WARN", f"[ERROR] Excepcion durante el flasheo de {rol}: {e}")
+        finally:
+            self.flasheando = False
+            if estaba_conectado:
+                self.root.after(0, self.log_consola, "SYS", f"[SYS] Restaurando conexion en {puerto}...")
+                time.sleep(1.2)
+                if rol_tx:
+                    self.root.after(0, self.toggle_conexion_tx)
+                else:
+                    self.root.after(0, self.toggle_conexion_rx)
+
+    # =========================================================================
+    # SINCRONIZACION PRE-DESPLIEGUE Y LIBERACION DE PUERTO (CAMPO)
+    # =========================================================================
+    def sincronizar_calibracion_rx(self):
+        """Transmite trama de calibracion y orden de persistencia NVS al receptor."""
+        if not self.conectado_rx or not self.serial_rx or not self.serial_rx.is_open:
+            if messagebox:
+                messagebox.showwarning("Atencion", "Conecte primero el puerto RX para sincronizar la calibracion.")
+            return
+
+        trims = [
+            self.trim_m1.get(),
+            self.trim_m2.get(),
+            self.trim_m3.get(),
+            self.trim_m4.get(),
+            self.trim_m5.get(),
+            self.trim_m6.get(),
+        ]
+        servos = [
+            self.ang_s1.get(),
+            self.ang_s2.get(),
+            self.ang_s3.get(),
+            self.ang_s4.get(),
+        ]
+
+        def tarea_sincronizacion():
+            def cb_log(msg):
+                self.root.after(0, self.log_consola, "SYS", msg)
+
+            cb_log("[SYS] Sincronizando parametros de calibracion con el receptor...")
+            exito = self.flasher_engine.sincronizar_calibracion(
+                serial_conn=self.serial_rx,
+                trims=trims,
+                servos=servos,
+                persistir_nvs=True,
+                callback_log=cb_log,
+            )
+            if exito:
+                self.root.after(0, lambda: self.badge_rx.config(text="[CALIB SINCRONIZADA]", bg="#064e3b", fg="#34d399"))
+            else:
+                self.root.after(0, lambda: self.badge_rx.config(text="[ERROR CALIB]", bg="#450a0a", fg="#f87171"))
+
+        threading.Thread(target=tarea_sincronizacion, daemon=True).start()
+
+    def liberar_rx_campo(self):
+        """Cierra de forma segura el puerto serie del receptor para operacion autonoma."""
+        def cb_log(msg):
+            self.root.after(0, self.log_consola, "SYS", msg)
+
+        if self.conectado_rx and self.serial_rx:
+            self.conectado_rx = False
+            self.flasher_engine.liberar_puerto(self.serial_rx, callback_log=cb_log)
+            self.serial_rx = None
+            if hasattr(self, 'btn_conectar_rx'):
+                self.btn_conectar_rx.config(text="Conectar RX", bg="#fbbf24", fg="#0c0e17")
+        else:
+            cb_log("[INFO] Receptor RX ya se encuentra desconectado y libre para campo.")
+
+        if hasattr(self, 'badge_rx'):
+            self.badge_rx.config(text="[RX LIBERADO - CAMPO]", bg="#1e293b", fg="#38bdf8")
+
+    # =========================================================================
+    # PROCESAMIENTO DE HANDSHAKE ACTIVO (TX Y RX)
+    # =========================================================================
+    def procesar_handshake_tx(self, placa, rol, version, linea):
+        self.log_consola("SYS", f"[HANDSHAKE TX] {linea} -> Placa:{placa} Rol:{rol} Ver:{version}")
+        if hasattr(self, 'badge_tx'):
+            self.badge_tx.config(text=f"[TX: {placa} {version}]", bg="#064e3b", fg="#34d399")
+        try:
+            perfil = self.registry.obtener_perfil(placa, default=None)
+            if perfil and hasattr(self, 'perfil_tx'):
+                self.perfil_tx.set(perfil.id)
+        except Exception:
+            pass
+
+    def procesar_handshake_rx(self, placa, rol, version, linea):
+        self.log_consola("SYS", f"[HANDSHAKE RX] {linea} -> Placa:{placa} Rol:{rol} Ver:{version}")
+        if hasattr(self, 'badge_rx'):
+            self.badge_rx.config(text=f"[RX: {placa} {version}]", bg="#451a03", fg="#fbbf24")
+        try:
+            perfil = self.registry.obtener_perfil(placa, default=None)
+            if perfil and hasattr(self, 'perfil_rx'):
+                self.perfil_rx.set(perfil.id)
+        except Exception:
+            pass
 
     def iniciar_hilos(self):
         self.hilo_tx = threading.Thread(target=self.bucle_lectura_tx, daemon=True)
@@ -859,7 +1195,8 @@ class HMIRoverDebug:
 
     def toggle_conexion_joy(self):
         if not SERIAL_DISPONIBLE:
-            messagebox.showerror("Error", "Librería pyserial no instalada.")
+            if messagebox:
+                messagebox.showerror("Error", "Libreria pyserial no instalada.")
             return
 
         if self.conectado_joy:
@@ -867,17 +1204,18 @@ class HMIRoverDebug:
             if self.serial_joy and self.serial_joy.is_open:
                 try:
                     self.serial_joy.close()
-                except:
+                except Exception:
                     pass
             self.btn_conectar_joy.config(text="Conectar Joy", bg="#00f5d4", fg="#0c0e17")
-            self.lbl_badge_joy.config(text="🔴 OFF", bg="#2a2e3f", fg="#f87171")
+            self.lbl_badge_joy.config(text="[OFF]", bg="#2a2e3f", fg="#f87171")
             self.dibujar_stick_neutro(self.canvas_joy_s1)
             self.dibujar_stick_neutro(self.canvas_joy_s2)
             self.log_consola("SYS", "Joystick Nano desconectado.")
         else:
             p = self.cb_puertos_joy.get()
             if not p or p in ["Sin puertos", "Sin pyserial"]:
-                messagebox.showwarning("Atención", "Seleccione un puerto COM válido para el Joystick.")
+                if messagebox:
+                    messagebox.showwarning("Atencion", "Seleccione un puerto COM valido para el Joystick.")
                 return
             try:
                 self.serial_joy = serial.Serial()
@@ -889,11 +1227,12 @@ class HMIRoverDebug:
                 self.serial_joy.open()
                 self.conectado_joy = True
                 self.btn_conectar_joy.config(text="Desconectar Joy", bg="#e63946", fg="#ffffff")
-                self.lbl_badge_joy.config(text=f"🟢 {p}", bg="#064e3b", fg="#34d399")
-                self.log_consola("SYS", f"Joystick físico conectado en {p} @ 115200 bps.")
+                self.lbl_badge_joy.config(text=f"[ON] {p}", bg="#064e3b", fg="#34d399")
+                self.log_consola("SYS", f"Joystick fisico conectado en {p} @ 115200 bps.")
             except Exception as e:
                 self.conectado_joy = False
-                messagebox.showerror("Error Joystick", f"No se pudo conectar a {p}:\n{e}")
+                if messagebox:
+                    messagebox.showerror("Error Joystick", f"No se pudo conectar a {p}:\n{e}")
 
     def bucle_lectura_joy(self):
         while self.ejecutando:
@@ -902,7 +1241,7 @@ class HMIRoverDebug:
                     linea = self.serial_joy.readline().decode('utf-8', errors='ignore').strip()
                     if linea.startswith("JOY:"):
                         self.procesar_trama_joystick(linea[4:])
-                except:
+                except Exception:
                     pass
             time.sleep(0.015)
 
@@ -1034,12 +1373,17 @@ class HMIRoverDebug:
                 try:
                     linea = self.serial_tx.readline().decode('utf-8', errors='ignore').strip()
                     if linea:
-                        if linea.startswith("PONG:"):
-                            self.root.after(0, self.log_consola, "SYS", f"✅ {linea}")
-                            self.root.after(0, lambda: self.badge_tx.config(text=f"🟢 ESP32 OK", bg="#064e3b", fg="#34d399"))
+                        if linea.startswith("ID:"):
+                            parsed = self.registry.parsear_handshake(linea, strict=False)
+                            if parsed:
+                                placa, rol, version = parsed
+                                self.root.after(0, self.procesar_handshake_tx, placa, rol, version, linea)
+                        elif linea.startswith("PONG:"):
+                            self.root.after(0, self.log_consola, "SYS", f"[OK] {linea}")
+                            self.root.after(0, lambda: self.badge_tx.config(text="[TX OK]", bg="#064e3b", fg="#34d399"))
                         elif self.mostrar_raw_esp.get():
-                            self.root.after(0, self.log_consola, "ESP", f"[ESP32 TX]: {linea}")
-                except:
+                            self.root.after(0, self.log_consola, "ESP", f"[TX RAW]: {linea}")
+                except Exception:
                     pass
             time.sleep(0.01)
 
@@ -1051,17 +1395,24 @@ class HMIRoverDebug:
                     if linea:
                         self.contador_rx_mkr += 1
                         self.procesar_linea_mkr(linea)
-                except:
+                except Exception:
                     pass
             time.sleep(0.01)
 
     def procesar_linea_mkr(self, linea):
-        if linea.startswith("PONG:"):
-            self.root.after(0, self.log_consola, "SYS", f"✅ {linea}")
-            self.root.after(0, lambda: self.badge_rx.config(text=f"🟢 MKR OK", bg="#451a03", fg="#fbbf24"))
+        if linea.startswith("ID:"):
+            parsed = self.registry.parsear_handshake(linea, strict=False)
+            if parsed:
+                placa, rol, version = parsed
+                self.root.after(0, self.procesar_handshake_rx, placa, rol, version, linea)
             return
 
-        # Si es la trama de telemetría estructurada TLM:izq,der,s1,s2,s3,s4,dt,cola
+        if linea.startswith("PONG:"):
+            self.root.after(0, self.log_consola, "SYS", f"[OK] {linea}")
+            self.root.after(0, lambda: self.badge_rx.config(text="[RX OK]", bg="#451a03", fg="#fbbf24"))
+            return
+
+        # Trama de telemetria estructurada TLM:izq,der,s1,s2,s3,s4,dt,cola
         if linea.startswith("TLM:"):
             datos = linea[4:].split(',')
             if len(datos) >= 8:
@@ -1086,14 +1437,14 @@ class HMIRoverDebug:
                     self.snapshot_rx['t'] = time.time()
                     self.snapshot_rx['activo'] = True
 
-                    # Actualizar gráfico RX y realizar validación cruzada
+                    # Actualizar grafico RX y realizar validacion cruzada
                     self.root.after(0, self.actualizar_grafico_rx)
                     self.root.after(0, self.validar_datos_cruzados)
-                except:
+                except Exception:
                     pass
         else:
             if self.mostrar_raw_mkr.get():
-                self.root.after(0, self.log_consola, "MKR", f"[MKR 1310 RX]: {linea}")
+                self.root.after(0, self.log_consola, "MKR", f"[RX RAW]: {linea}")
 
     def validar_datos_cruzados(self):
         tx = self.snapshot_tx
@@ -1103,8 +1454,6 @@ class HMIRoverDebug:
         if latencia >= 0:
             self.ultima_latencia_ms = round(latencia, 1)
 
-        # Verificar si coinciden las magnitudes
-        # Nota: en parada o STOP, izq y der son 0
         match_izq = (tx['izq'] == rx['izq'])
         match_der = (tx['der'] == rx['der'])
         match_s1 = (tx['s1'] == rx['s1'])
@@ -1116,17 +1465,17 @@ class HMIRoverDebug:
 
         if total_match:
             self.contador_matches += 1
-            self.badge_validacion.config(text=f"🟢 MATCH 100% (Lat: {self.ultima_latencia_ms} ms)", bg="#064e3b", fg="#34d399")
+            self.badge_validacion.config(text=f"[MATCH 100%] (Lat: {self.ultima_latencia_ms} ms)", bg="#064e3b", fg="#34d399")
             self.lbl_met_latencia.config(text=f"{self.ultima_latencia_ms} ms", style="Value.TLabel")
         else:
             self.contador_mismatches += 1
-            self.badge_validacion.config(text="🟡 EN TRANSICIÓN / DISCREPANCIA", bg="#78350f", fg="#fde047")
+            self.badge_validacion.config(text="[TRANSICION / DISCREPANCIA]", bg="#78350f", fg="#fde047")
 
         self.lbl_met_matches.config(text=f"{self.contador_matches} OK")
         self.lbl_met_mismatches.config(text=f"{self.contador_mismatches}")
 
     # =========================================================================
-    # TRANSMISION DE COMANDOS (GUI -> ESP32)
+    # TRANSMISION DE COMANDOS (GUI -> TX)
     # =========================================================================
     def enviar_trama_actual(self):
         cmd = self.comando_actual.upper()
@@ -1182,9 +1531,8 @@ class HMIRoverDebug:
             self.serial_tx.write(raw_bytes)
             self.contador_tx += 1
 
-            # Loggear a la consola
             hex_str = " ".join(f"{b:02X}" for b in raw_bytes)
-            msg = f"[TX PC -> ESP32 #{self.contador_tx}]: \"{trama.strip()}\""
+            msg = f"[TX PC -> MCU #{self.contador_tx}]: \"{trama.strip()}\""
             self.log_consola("TX", msg)
             if self.mostrar_hex.get():
                 self.log_consola("TX", f"   BYTES: [{hex_str}] ({len(raw_bytes)} B)")
@@ -1206,9 +1554,8 @@ class HMIRoverDebug:
         canvas.create_polygon(puntos_rotados, fill=color, outline="#ffffff", width=1)
         canvas.create_text(cx, cy, text=texto, fill="#ffffff", font=("Segoe UI", 5, "bold"))
 
-        # Flecha indicadora de dirección y sentido de tracción por rueda
         if pwm != 0:
-            arrow_color = "#34d399" if pwm > 0 else "#f97316"  # Verde avance, Naranja reversa
+            arrow_color = "#34d399" if pwm > 0 else "#f97316"
             longitud = 8 + int((min(255, abs(pwm)) / 255.0) * 10)
             signo = 1 if pwm > 0 else -1
 
@@ -1277,7 +1624,7 @@ class HMIRoverDebug:
         c.delete("all")
         cx, cy = 87, 87
         c.create_rectangle(cx - 26, cy - 42, cx + 26, cy + 42, fill="#151928", outline="#fbbf24", width=2)
-        c.create_text(cx, cy, text="RX\nMKR", fill="#fbbf24", font=("Segoe UI", 7, "bold"), justify="center")
+        c.create_text(cx, cy, text="RX\nROVER", fill="#fbbf24", font=("Segoe UI", 7, "bold"), justify="center")
 
         rx = self.snapshot_rx
         pwms = [rx['izq'], rx['izq'], rx['izq'], rx['der'], rx['der'], rx['der']]
@@ -1333,12 +1680,16 @@ class HMIRoverDebug:
             self._log_buffer.append((tag, texto))
 
     def limpiar_consola(self):
-        self.txt_consola.delete("1.0", "end")
+        if self.txt_consola:
+            self.txt_consola.delete("1.0", "end")
 
     def guardar_log_archivo(self):
+        if not self.txt_consola:
+            return
         contenido = self.txt_consola.get("1.0", "end")
         if not contenido.strip():
-            messagebox.showinfo("Info", "Consola vacía.")
+            if messagebox:
+                messagebox.showinfo("Info", "Consola vacia.")
             return
         ruta = filedialog.asksaveasfilename(defaultextension=".log",
                                             filetypes=[("Log", "*.log"), ("Texto", "*.txt")],
@@ -1347,9 +1698,11 @@ class HMIRoverDebug:
             try:
                 with open(ruta, "w", encoding="utf-8") as f:
                     f.write(contenido)
-                messagebox.showinfo("Éxito", f"Log guardado en:\n{ruta}")
+                if messagebox:
+                    messagebox.showinfo("Exito", f"Log guardado en:\n{ruta}")
             except Exception as e:
-                messagebox.showerror("Error", f"Error guardando:\n{e}")
+                if messagebox:
+                    messagebox.showerror("Error", f"Error guardando:\n{e}")
 
     # =========================================================================
     # PRESETS Y CALIBRACIONES
@@ -1369,17 +1722,17 @@ class HMIRoverDebug:
 
     def calcular_cinematica_inversa(self, vx, vy, omega, L=1.0, W=1.0):
         """
-        Calcula la cinemática inversa 2D para la plataforma Rocker-Bogie 6x6.
-        Determina los ángulos tangenciales exactos de los 4 servos (S1, S2, S3, S4)
-        para giro y traslación sin derrape ni arrastre lateral.
-        
+        Calcula la cinematica inversa 2D para la plataforma Rocker-Bogie 6x6.
+        Determina los angulos tangenciales exactos de los 4 servos (S1, S2, S3, S4)
+        para giro y traslacion sin derrape ni arrastre lateral.
+
         Marco de referencia (Cuerpo del Rover):
-          +X: Hacia la derecha del vehículo
+          +X: Hacia la derecha del vehiculo
           +Y: Hacia adelante (longitudinal)
           +omega: Giro antihorario (CCW)
           -omega: Giro horario (CW)
-          
-        Posición de las esquinas respecto al centro de rotación (0, 0):
+
+        Posicion de las esquinas respecto al centro de rotacion (0, 0):
           S1 (Delantero Izq): (-W, +L)
           S2 (Delantero Der): (+W, +L)
           S3 (Trasero Izq):   (-W, -L)
@@ -1395,37 +1748,33 @@ class HMIRoverDebug:
         for rueda, (xi, yi) in esquinas.items():
             v_ix = vx - omega * yi
             v_iy = vy + omega * xi
-            
+
             if abs(v_ix) < 1e-4 and abs(v_iy) < 1e-4:
                 angulos[rueda] = 90
                 continue
-                
-            # Determinar si la rueda opera con tracción longitudinal positiva o reversa
-            # En giro sobre su eje horario (omega < 0), lado derecho retrocede (v_iy < 0)
-            # En giro sobre su eje antihorario (omega > 0), lado izquierdo retrocede (v_iy < 0)
+
             trac_reversa = (v_iy < -1e-4) or (abs(v_iy) <= 1e-4 and ((omega < 0 and xi > 0) or (omega > 0 and xi < 0)))
-            
+
             if trac_reversa:
                 heading_rad = math.atan2(-v_ix, -v_iy)
             else:
                 heading_rad = math.atan2(v_ix, v_iy)
-                
+
             heading_deg = math.degrees(heading_rad)
-            # Conversión a ángulo de servo: 90° es recto, <90° gira derecha, >90° gira izquierda
             servo_deg = int(round(90 - heading_deg))
             if self.servos_360.get():
                 servo_deg = servo_deg % 360
             else:
                 servo_deg = max(10, min(170, servo_deg))
             angulos[rueda] = servo_deg
-            
+
         if self.invertir_servos.get():
             for k in angulos:
                 if self.servos_360.get():
                     angulos[k] = (360 - angulos[k]) % 360
                 else:
                     angulos[k] = 180 - angulos[k]
-                
+
         return angulos['S1'], angulos['S2'], angulos['S3'], angulos['S4']
 
     def al_cambiar_inversion_servos(self):
@@ -1440,17 +1789,12 @@ class HMIRoverDebug:
             self.actualizar_grafico_tx()
 
     def preset_point_turn(self):
-        # Cinemática inversa tangencial al círculo concéntrico centrado en el rover:
-        # S1 (Del. Izq) = 45°, S2 (Del. Der) = 135°, S3 (Tras. Izq) = 135°, S4 (Tras. Der) = 45°
         s1, s2, s3, s4 = self.calcular_cinematica_inversa(0.0, 0.0, -1.0)
         self.ang_s1.set(s1); self.ang_s2.set(s2); self.ang_s3.set(s3); self.ang_s4.set(s4)
         self.enviar_trama_actual()
-        self.log_consola("SYS", f"Geometría tangencial configurada para Giro 360°: S1={s1}°, S2={s2}°, S3={s3}°, S4={s4}°.")
+        self.log_consola("SYS", f"Geometria tangencial configurada para Giro 360 deg: S1={s1} deg, S2={s2} deg, S3={s3} deg, S4={s4} deg.")
 
     def preset_cangrejo(self):
-        # Modo Cangrejo:
-        # En servos 360°: traslación lateral pura a 180° (o 0° con inversión)
-        # En servos estándar: diagonal a 45°
         if self.servos_360.get():
             s1, s2, s3, s4 = (180, 180, 180, 180) if not self.invertir_servos.get() else (0, 0, 0, 0)
         else:
@@ -1458,8 +1802,8 @@ class HMIRoverDebug:
         self.ang_s1.set(s1); self.ang_s2.set(s2); self.ang_s3.set(s3); self.ang_s4.set(s4)
         self.enviar_trama_actual()
         self.actualizar_grafico_tx()
-        tipo = "Lateral Puro 90°" if self.servos_360.get() else "Diagonal 45°"
-        self.log_consola("SYS", f"Geometría configurada para Modo Cangrejo ({tipo}): S1={s1}°, S2={s2}°, S3={s3}°, S4={s4}°.")
+        tipo = "Lateral Puro 90 deg" if self.servos_360.get() else "Diagonal 45 deg"
+        self.log_consola("SYS", f"Geometria configurada para Modo Cangrejo ({tipo}): S1={s1} deg, S2={s2} deg, S3={s3} deg, S4={s4} deg.")
 
     def sync_master_izq(self, val):
         self.actualizar_labels_trim()
@@ -1589,11 +1933,11 @@ class HMIRoverDebug:
         t_ahora = time.time()
         dt = t_ahora - self.ultimo_tiempo_tasa
 
-        # Si está activado TX Continuo y conectado TX, enviar periódicamente
+        # Si esta activado TX Continuo y conectado TX, enviar periodicamente
         if self.tx_continuo.get() and self.conectado_tx:
             self.enviar_trama_actual()
 
-        # Cálculo de tasa Hz
+        # Calculo de tasa Hz
         if dt >= 1.0:
             self.tasa_tx_hz = int(self.contador_tx / dt)
             self.contador_tx = 0
@@ -1603,11 +1947,11 @@ class HMIRoverDebug:
         self.lbl_met_tot_tx.config(text=f"{self.contador_tx}")
         self.lbl_met_tot_rx.config(text=f"{self.contador_rx_mkr}")
 
-        # Comprobar si el MKR dejó de emitir telemetría (>1.5 seg)
+        # Comprobar si el receptor dejo de emitir telemetria (>1.5 seg)
         if self.conectado_rx and (t_ahora - self.snapshot_rx['t'] > 1.5):
-            self.badge_validacion.config(text="🔴 SIN SEÑAL DE RECEPTOR MKR", bg="#450a0a", fg="#f87171")
+            self.badge_validacion.config(text="[SIN SENAL DE RECEPTOR]", bg="#450a0a", fg="#f87171")
 
-        self.root.after(50, self.bucle_periodico_ui) # 20 Hz
+        self.root.after(50, self.bucle_periodico_ui)
 
 
 def configurar_captura_errores():
@@ -1624,11 +1968,12 @@ def configurar_captura_errores():
         except Exception:
             pass
         try:
-            messagebox.showerror(
-                "Error Inesperado - HMI Rover Debug",
-                f"Se produjo un fallo al ejecutar la aplicación de depuración:\n\n{valor}\n\n"
-                f"Detalles técnicos guardados en:\n{log_path}"
-            )
+            if messagebox:
+                messagebox.showerror(
+                    "Error Inesperado - HMI Rover Debug",
+                    f"Se produjo un fallo al ejecutar la aplicacion de depuracion:\n\n{valor}\n\n"
+                    f"Detalles tecnicos guardados en:\n{log_path}"
+                )
         except Exception:
             pass
 
@@ -1637,6 +1982,9 @@ def configurar_captura_errores():
 
 if __name__ == "__main__":
     configurar_captura_errores()
+    if not TKINTER_DISPONIBLE:
+        sys.stderr.write("[ERROR] El modulo tkinter no esta instalado en este entorno Python.\n")
+        sys.exit(1)
     try:
         ventana_principal = tk.Tk()
         app = HMIRoverDebug(ventana_principal)
