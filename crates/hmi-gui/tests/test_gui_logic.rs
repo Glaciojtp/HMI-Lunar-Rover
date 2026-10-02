@@ -310,6 +310,65 @@ fn test_generacion_paquete_rover_binario() {
     assert_eq!(bytes[1], izq_bytes[1]);
 }
 
+#[test]
+fn test_cinematica_neutro_respeta_servos_manuales() {
+    let trims = TrimsMotores::default();
+    let servos = AngulosServos::clamped(140, 80, 110, 50);
+    let teclas = TeclasEstado::default(); // Sin movimiento
+
+    // En Ackermann, PointTurn, Crab y Manual, el estado neutro no debe forzar centrado a 90
+    for modo in [
+        ModoConduccion::Ackermann,
+        ModoConduccion::PointTurn,
+        ModoConduccion::Crab,
+        ModoConduccion::Manual,
+    ] {
+        let estado = calcular_cinematica(&teclas, modo, &trims, &servos, false);
+        assert_eq!(estado.traccion_izq, 0);
+        assert_eq!(estado.traccion_der, 0);
+        assert_eq!(estado.servos.s1, 140);
+        assert_eq!(estado.servos.s2, 80);
+        assert_eq!(estado.servos.s3, 110);
+        assert_eq!(estado.servos.s4, 50);
+        assert_eq!(estado.comando_nombre, "NEUTRO");
+    }
+}
+
+#[test]
+fn test_geometria_orientacion_colineal_vector_y_rueda() {
+    // Para cualquier angulo en [10, 170], el vector longitudinal del rectangulo
+    // y el vector unitario de la flecha deben ser estrictamente colineales
+    let angulos_test = [10u8, 45, 60, 90, 120, 135, 170];
+    let h_half = 14.0f32;
+
+    for &ang in &angulos_test {
+        let rad = (90.0 - ang as f32).to_radians();
+
+        // Vector unitario de la direccion de traccion
+        let ux = rad.sin();
+        let uy = -rad.cos();
+
+        // Vector desde el centro al vertice superior central del rectangulo
+        // vertice local (0, -h_half)
+        let rx = 0.0 * rad.cos() - (-h_half) * rad.sin();
+        let ry = 0.0 * rad.sin() + (-h_half) * rad.cos();
+
+        // Normalizar vector del rectangulo
+        let norm = (rx * rx + ry * ry).sqrt();
+        let vx = rx / norm;
+        let vy = ry / norm;
+
+        // Producto escalar (dot product) debe ser exactamente 1.0 (colineal paralelo)
+        let dot = ux * vx + uy * vy;
+        assert!(
+            (dot - 1.0f32).abs() < 1e-5,
+            "Error de colinealidad para angulo {} deg: dot={}",
+            ang,
+            dot
+        );
+    }
+}
+
 // =========================================================================
 // 5. AUDITORIA ESTRICTA DE ERRADICACION TOTAL DE EMOJIS
 // =========================================================================

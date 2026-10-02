@@ -215,6 +215,7 @@ impl RoverApp {
         self.teclas = TeclasEstado::default();
         self.teclas.space = true;
         self.serial_worker.send_stop();
+        self.servos_manuales.centrar();
         self.estado_chasis = calcular_cinematica(
             &self.teclas,
             self.modo,
@@ -321,6 +322,10 @@ impl RoverApp {
 
     /// Captura y mapea las pulsaciones de teclado para pilotaje.
     fn procesar_teclado(&mut self, ctx: &egui::Context) {
+        if ctx.wants_keyboard_input() {
+            return;
+        }
+
         ctx.input(|i| {
             // Parada de emergencia con Barra Espaciadora
             if i.key_pressed(Key::Space) {
@@ -346,6 +351,12 @@ impl RoverApp {
             &self.servos_manuales,
             self.invertir_servos,
         );
+
+        // Si hay una orden de direccion por teclado en un modo coordinado (Ackermann/PointTurn/Crab),
+        // sincronizar los deslizadores manuales con los angulos activos del chasis
+        if self.teclas.hay_movimiento() && self.modo != ModoConduccion::Manual {
+            self.servos_manuales = self.estado_chasis.servos;
+        }
     }
 
     /// Transmite la consigna de control al hardware a una frecuencia regular (20 Hz).
@@ -504,6 +515,7 @@ impl eframe::App for RoverApp {
                 ui.separator();
 
                 ui.label("Modo:");
+                let modo_previo = self.modo;
                 egui::ComboBox::from_id_source("cb_modo")
                     .selected_text(self.modo.as_str())
                     .show_ui(ui, |ui| {
@@ -512,6 +524,21 @@ impl eframe::App for RoverApp {
                         ui.selectable_value(&mut self.modo, ModoConduccion::Crab, "CRAB");
                         ui.selectable_value(&mut self.modo, ModoConduccion::Manual, "MANUAL");
                     });
+                if self.modo != modo_previo {
+                    match self.modo {
+                        ModoConduccion::PointTurn => self.servos_manuales.preset_point_turn(),
+                        ModoConduccion::Crab => self.servos_manuales.preset_crab(),
+                        ModoConduccion::Ackermann => self.servos_manuales.centrar(),
+                        ModoConduccion::Manual => {}
+                    }
+                    self.estado_chasis = calcular_cinematica(
+                        &self.teclas,
+                        self.modo,
+                        &self.trims,
+                        &self.servos_manuales,
+                        self.invertir_servos,
+                    );
+                }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let btn_stop = egui::Button::new(
@@ -659,7 +686,9 @@ impl eframe::App for RoverApp {
                             if ui.button("[Preset Cangrejo (45 deg)]").clicked() {
                                 self.servos_manuales.preset_crab();
                             }
-                            ui.checkbox(&mut self.invertir_servos, "Invertir Servos");
+                            if ui.checkbox(&mut self.invertir_servos, "Invertir Servos").changed() {
+                                self.servos_manuales.invertir();
+                            }
                             if ui
                                 .checkbox(&mut self.modo_binario, "Modo Binario Estricto (6B)")
                                 .changed()
@@ -863,7 +892,7 @@ impl eframe::App for RoverApp {
 }
 
 impl RoverApp {
-    /// Renderiza una rueda rotada segun el angulo de su servomotor y dibuja su vector de velocidad.
+    /// Renderiza una rueda rotada segun el angulo de su servomotor y dibuja su vector de velocidad con flecha.
     fn dibujar_rueda(
         painter: &egui::Painter,
         pos: Pos2,
@@ -871,12 +900,14 @@ impl RoverApp {
         pwm: i16,
         label: &str,
     ) {
-        // En nuestro marco: 90 deg es recto (0 rotacion relativa)
-        // Menor a 90 gira a la derecha, Mayor a 90 gira a la izquierda
-        let rot_rad = (angulo_deg as f32 - 90.0).to_radians();
+        // En nuestro marco y en Python HMI:
+        // 90 deg es recto (rad = 0).
+        // Menor a 90 deg (ej 60 deg) inclina hacia la derecha (+X).
+        // Mayor a 90 deg (ej 120 deg) inclina hacia la izquierda (-X).
+        let rad = (90.0 - angulo_deg as f32).to_radians();
 
-        let w_half = 6.0;
-        let h_half = 14.0;
+        let w_half = 7.0f32;
+        let h_half = 14.0f32;
 
         let corners = [
             Vec2::new(-w_half, -h_half),
@@ -888,19 +919,19 @@ impl RoverApp {
         let rotated_points: Vec<Pos2> = corners
             .iter()
             .map(|&c| {
-                let rx = c.x * rot_rad.cos() - c.y * rot_rad.sin();
-                let ry = c.x * rot_rad.sin() + c.y * rot_rad.cos();
+                let rx = c.x * rad.cos() - c.y * rad.sin();
+                let ry = c.x * rad.sin() + c.y * rad.cos();
                 Pos2::new(pos.x + rx, pos.y + ry)
             })
             .collect();
 
-        // Color de la rueda segun potencia y sentido
-        let wheel_color = if pwm > 10 {
-            Color32::from_rgb(56, 176, 0) // Avance: Verde
-        } else if pwm < -10 {
-            Color32::from_rgb(248, 113, 113) // Reversa: Rojo
+        // Color de la rueda segun potencia y sentido (congruente con Python HMI)
+        let wheel_color = if pwm > 0 {
+            Color32::from_rgb(56, 176, 0) // Avance: Verde (#38b000)
+        } else if pwm < 0 {
+            Color32::from_rgb(255, 159, 28) // Reversa: Naranja (#ff9f1c)
         } else {
-            Color32::from_rgb(51, 65, 85) // Detenido: Gris oscuro
+            Color32::from_rgb(100, 116, 139) // Detenido: Slate neutro (#64748b)
         };
 
         painter.add(egui::Shape::convex_polygon(
@@ -909,30 +940,54 @@ impl RoverApp {
             Stroke::new(1.0f32, Color32::from_rgb(203, 213, 225)),
         ));
 
-        // Vector de velocidad (flecha en la direccion de traccion)
-        if pwm.abs() > 10 {
-            let speed_ratio = (pwm as f32 / 255.0).clamp(-1.0, 1.0);
-            let arrow_len = speed_ratio * 20.0;
-            // La rueda apunta longitudinalmente hacia -Y en la pantalla
-            let arrow_vec = Vec2::new(
-                -arrow_len * rot_rad.sin(),
-                -arrow_len * rot_rad.cos(),
-            );
-            let arrow_end = Pos2::new(pos.x + arrow_vec.x, pos.y + arrow_vec.y);
-
-            painter.line_segment(
-                [pos, arrow_end],
-                Stroke::new(2.0f32, Color32::from_rgb(0, 245, 212)),
-            );
-        }
-
-        // Etiqueta del motor
+        // Etiqueta centrada del motor dentro de la rueda (M1..M6)
         painter.text(
-            Pos2::new(pos.x, pos.y + 18.0),
+            pos,
             egui::Align2::CENTER_CENTER,
             label,
-            FontId::monospace(9.0),
-            Color32::from_rgb(148, 163, 184),
+            FontId::monospace(8.0),
+            Color32::WHITE,
         );
+
+        // Vector de traccion (flecha en la direccion y sentido longitudinal de la rueda)
+        if pwm != 0 {
+            let arrow_color = if pwm > 0 {
+                Color32::from_rgb(52, 211, 153) // Verde avance (#34d399)
+            } else {
+                Color32::from_rgb(249, 115, 22)  // Naranja reversa (#f97316)
+            };
+
+            let longitud = 10.0f32 + (pwm.abs().min(255) as f32 / 255.0f32) * 12.0f32;
+            let signo = if pwm > 0 { 1.0f32 } else { -1.0f32 };
+
+            let ux = rad.sin();
+            let uy = -rad.cos();
+
+            let x_ini = pos.x + signo * (h_half * 0.4f32) * ux;
+            let y_ini = pos.y + signo * (h_half * 0.4f32) * uy;
+            let x_fin = pos.x + signo * (h_half + longitud) * ux;
+            let y_fin = pos.y + signo * (h_half + longitud) * uy;
+
+            let p_ini = Pos2::new(x_ini, y_ini);
+            let p_fin = Pos2::new(x_fin, y_fin);
+
+            // Segmento de linea principal
+            painter.line_segment([p_ini, p_fin], Stroke::new(2.0f32, arrow_color));
+
+            // Cabeza de flecha triangular en p_fin apuntando en sentido del movimiento
+            let dir = Vec2::new(signo * ux, signo * uy);
+            let perp = Vec2::new(-dir.y, dir.x);
+            let head_len = 6.0f32;
+            let head_width = 3.5f32;
+            let base = p_fin - dir * head_len;
+            let v1 = base + perp * head_width;
+            let v2 = base - perp * head_width;
+
+            painter.add(egui::Shape::convex_polygon(
+                vec![p_fin, v1, v2],
+                arrow_color,
+                Stroke::NONE,
+            ));
+        }
     }
 }

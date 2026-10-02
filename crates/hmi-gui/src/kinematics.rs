@@ -208,20 +208,26 @@ pub fn calcular_cinematica(
     invertir_servos: bool,
 ) -> EstadoChasis {
     // Parada de emergencia prioritaria
-    if teclas.space || !teclas.hay_movimiento() {
+    if teclas.space {
         let mut s = *servos_manuales;
-        if modo != ModoConduccion::Manual {
-            s.centrar();
-        }
-        if invertir_servos {
-            s.invertir();
-        }
+        s.centrar();
         return EstadoChasis {
             traccion_izq: 0,
             traccion_der: 0,
             servos: s,
             pwms_motores: [0; 6],
-            comando_nombre: if teclas.space { "STOP" } else { "NEUTRO" },
+            comando_nombre: "STOP",
+        };
+    }
+
+    // Estado neutro: sin teclas de navegacion activas (preserva angulos de servos)
+    if !teclas.hay_movimiento() {
+        return EstadoChasis {
+            traccion_izq: 0,
+            traccion_der: 0,
+            servos: *servos_manuales,
+            pwms_motores: [0; 6],
+            comando_nombre: "NEUTRO",
         };
     }
 
@@ -376,7 +382,7 @@ pub fn calcular_cinematica(
         }
     }
 
-    if invertir_servos {
+    if invertir_servos && modo != ModoConduccion::Manual {
         servos.invertir();
     }
 
