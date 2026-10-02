@@ -18,7 +18,7 @@
 
 ---
 
-### Tarea 1: Firmware Transmisor Oficial para Arduino Nano ESP32
+### Task 1: Firmware Transmisor Oficial para Arduino Nano ESP32
 
 **Archivos:**
 - Crear: `02_Debug_y_Pruebas/Firmware_Debug/Transmisor_ArduinoNano_ESP32/Transmisor_ArduinoNano_ESP32.ino`
@@ -45,7 +45,7 @@
 
 ---
 
-### Tarea 2: Modulo de Perfiles de Hardware y Autodeteccion (`hardware_profiles.py`)
+### Task 2: Modulo de Perfiles de Hardware y Autodeteccion (`hardware_profiles.py`)
 
 **Archivos:**
 - Crear: `02_Debug_y_Pruebas/HMI_Debug/hardware_profiles.py`
@@ -84,7 +84,7 @@
 
 ---
 
-### Tarea 3: Motor de Flasheo en 1 Clic y Utilidad de Aprovisionamiento (`flasher_engine.py`)
+### Task 3: Motor de Flasheo en 1 Clic y Utilidad de Aprovisionamiento (`flasher_engine.py`)
 
 **Archivos:**
 - Crear: `02_Debug_y_Pruebas/HMI_Debug/flasher_engine.py`
@@ -122,7 +122,7 @@
 
 ---
 
-### Tarea 4: Integracion en la Interfaz Grafica `HMI_Rover_Debug.py`
+### Task 4: Integracion en la Interfaz Grafica `HMI_Rover_Debug.py`
 
 **Archivos:**
 - Modificar: `02_Debug_y_Pruebas/HMI_Debug/HMI_Rover_Debug.py`
@@ -157,7 +157,7 @@
 
 ---
 
-### Tarea 5: Estructuracion del Workspace Paralelo en Rust y Crate `protocol-rover`
+### Task 5: Estructuracion del Workspace Paralelo en Rust y Crate `protocol-rover`
 
 **Archivos:**
 - Crear: `/mnt/c/Users/joaqu/Desktop/HMI-Lunar-Rover-Rust/Cargo.toml`
@@ -187,7 +187,7 @@
 
 ---
 
-### Tarea 6: Aplicacion de Escritorio Nativa en Rust (`hmi-gui`)
+### Task 6: Aplicacion de Escritorio Nativa en Rust (`hmi-gui`)
 
 **Archivos:**
 - Crear: `/mnt/c/Users/joaqu/Desktop/HMI-Lunar-Rover-Rust/crates/hmi-gui/Cargo.toml`
@@ -223,7 +223,7 @@
 
 ---
 
-### Tarea 7: Firmwares Embebidos en Rust (`esp-hal`)
+### Task 7: Firmwares Embebidos en Rust (`esp-hal`)
 
 **Archivos:**
 - Crear: `/mnt/c/Users/joaqu/Desktop/HMI-Lunar-Rover-Rust/crates/firmware-tx-esp32/Cargo.toml`
@@ -248,7 +248,7 @@
 
 ---
 
-### Tarea 8: Verificacion Integral, Guia de Usuario y Sincronizacion
+### Task 8: Verificacion Integral, Guia de Usuario y Sincronizacion
 
 **Archivos:**
 - Actualizar: `02_Debug_y_Pruebas/Lanzar_HMI_Debug.bat`
