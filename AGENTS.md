@@ -121,6 +121,24 @@ Alternativa oficial al MKR 1310. Trabaja a **3.3V nativo** (ESP32-S3) con PWM po
 
 ---
 
+### 4.4. Transmisor Oficial: Arduino Nano ESP32 (Dongle USB-RF y Futuro Mando)
+Dispositivo de transmision oficial predeterminado (ESP32-S3 a 3.3V nativo). Recibe consignas por USB CDC a 115200 bps o por sticks analogicos, respondiendo a handshakes activos (`IDENT` -> `ID:NANO_ESP32:TX:v2.1`):
+
+| Componente Físico | Pin del Módulo | Pin Arduino Nano ESP32 | Función / Observación |
+|---|---|---|---|
+| **NRF24L01** | VCC | **3.3V** | Alimentación lógica regulada (¡Nunca 5V!). Con capacitor 10–100µF |
+| **NRF24L01** | GND | **GND** | Tierra común |
+| **NRF24L01** | CE | **Pin D9** | Chip Enable (GPIO 18) |
+| **NRF24L01** | CSN | **Pin D10** | Chip Select SPI (GPIO 21) |
+| **NRF24L01** | MOSI | **Pin D11** | Bus SPI Hardware (GPIO 38) |
+| **NRF24L01** | MISO | **Pin D12** | Bus SPI Hardware (GPIO 47) |
+| **NRF24L01** | SCK | **Pin D13** | Bus SPI Hardware (GPIO 48) |
+| **LED RGB Integrado** | Rojo | **GPIO 46** | Indicador de error / parada (Activo en bajo) |
+| **LED RGB Integrado** | Verde | **GPIO 0** | Indicador de transmisión RF exitosa (Activo en bajo) |
+| **LED RGB Integrado** | Azul | **GPIO 45** | Indicador de enlace USB activo (Activo en bajo) |
+
+---
+
 ## 5. Protocolo de Comunicación y Robustez de Software
 
 ### 5.1. Estructura Binaria de Datos Unificada (Trama de 6 Bytes)
@@ -156,6 +174,15 @@ struct __attribute__((packed)) Paquete {
 5. **Inversión Mecánica en Servomotores:** La macro de dirección en teclado envía 120° para la tecla `A` (giro a la izquierda) y 60° para la tecla `D` (giro a la derecha), compensando la orientación invertida con la que están montados los servos en el chasis físico.
 6. **Compensación de Motores en Tiempo Real:** Debido a discrepancias de fabricación en los motores amarillos de CC (el motor izquierdo rota con mayor velocidad que el derecho), la interfaz de control cuenta con sliders de calibración independiente de potencia PWM para nivelar la trayectoria recta en marcha.
 
+### 5.4. Matriz de Perfiles de Hardware, Flasher Engine y Stack Rust
+1. **Autodetección Pasiva y Handshake Activo:** El módulo `hardware_profiles.py` evalúa los USB VID:PID en el escaneo de puertos (Nano ESP32: `0x2341:0x0070`, ESP32-C3: `0x303A:0x1001`, MKR 1310: `0x2341:0x8054`) y corrobora activamente mediante `IDENT` -> `ID:<PLACA>:<ROL>:<VERSION>`. El perfil predeterminado oficial del proyecto es `ARDUINO_NANO_ESP32`.
+2. **Motor de Flasheo en 1 Clic (`flasher_engine.py`):** Permite compilar y subir firmware directamente desde la GUI mediante `arduino-cli` o fallback a `esptool` en un hilo secundario sin congelar Tkinter, gestionando el ciclo de vida del puerto serie (cierre temporal previo y reconexión automática tras arranque).
+3. **Sincronización Pre-Despliegue y Liberación de Puerto:** Soporta el flujo de banco de pruebas con doble conexión (TX + RX), enviando tramas `CALIB,m1..m6,s1..s4` y `PERSIST_NVS` para guardar en memoria no volátil, seguido del cierre seguro del puerto (`liberar_puerto`) para operación autónoma en campo por batería.
+4. **Stack Paralelo en Lenguaje Rust (`HMI-Lunar-Rover-Rust`):** Repositorio gemelo en Rust con arquitectura multi-crate:
+   - `protocol-rover`: Crate `#![no_std]` con el struct binario `PaqueteRover` empaquetado a 6 bytes exactos y asserts estáticos en tiempo de compilación.
+   - `hmi-gui`: Aplicación de escritorio nativa en `egui`/`eframe` con renderizado 2D por GPU del chasis Rocker-Bogie y trabajador serial desacoplado en hilos del sistema operativo mediante canales mpsc.
+   - `firmware-tx-esp32` y `firmware-rx-esp32`: Firmwares embebidos en Rust para el transmisor y receptor a bordo.
+
 ---
 
 ## 6. Estructura del Repositorio
@@ -167,17 +194,17 @@ HMI-Lunar-Rover/
 │   ├── HMI/                                   # HMI_Rover_V2.py (GUI principal de pilotaje)
 │   ├── Receptor_Rover_NanoESP32/              # Ejecutor_ArduinoNano_ESP32.ino (Receptor Oficial)
 │   ├── Receptor_Rover_MKR1310/                # Ejecutor_ArduinoMKR_Optimizado.ino (Receptor previo)
-│   ├── Transmisor_PC_ESP32C3/                 # Control_ESP32_C3_Optimizado.ino (Puente USB-RF)
+│   ├── Transmisor_PC_ESP32C3/                 # Control_ESP32_C3_Optimizado.ino (Puente USB-RF previo)
 │   └── Mando_Joystick_Fisico/                 # Joystick_Arduino_Nano.ino (Mando RC autonomo)
 │
 ├── 02_Debug_y_Pruebas/                        # Herramientas de depuracion y laboratorio
-│   ├── HMI_Debug/                             # HMI_Rover_Debug.py (Telemetria y validacion)
-│   ├── Firmware_Debug/                        # Firmwares con volcado HEX y logs FIFO
+│   ├── HMI_Debug/                             # HMI_Rover_Debug.py, hardware_profiles.py, flasher_engine.py
+│   ├── Firmware_Debug/                        # Transmisor_ArduinoNano_ESP32.ino, firmwares de test
 │   ├── Test_RF_Unitarios/                     # Sketches de prueba de radiofrecuencia NRF24L01
-│   └── Lanzar_HMI_Debug.bat                   # Acceso directo al modo diagnostico
+│   └── Lanzar_HMI_Debug.bat                   # Acceso directo al modo diagnostico y flasheo
 │
 ├── 03_Documentacion_y_Guias/                  # Manuales y planos de conexionado
-│   ├── Guias/                                 # GUIA_RAPIDA_EQUIPO, GUIA_JOYSTICK_HARDWARE, etc.
+│   ├── Guias/                                 # GUIA_RAPIDA_EQUIPO, ESTUDIO_VIABILIDAD_MAPEO_LIDAR_CAMARA_RUST
 │   └── Esquematicos/                          # ESQUEMATICO_NANO_ESP32 y ESQUEMATICO_MKR1310
 │
 ├── 04_Legacy_y_Versiones_Previas/             # Archivos historicos o de grupos anteriores
@@ -200,6 +227,14 @@ HMI-Lunar-Rover/
 ├── Compilar_HMI_a_EXE.bat                     # Compilador de 1 clic a HMI_Rover_Lunar_V2.exe
 ├── Subir_Cambios.bat                          # Sincronizador rapido con GitHub
 └── .gitignore                                 # Exclusiones de Git
+
+C:\Users\joaqu\Desktop\HMI-Lunar-Rover-Rust/   # Workspace paralelo nativo en Rust
+├── Cargo.toml                                 # Manifiesto raiz de workspace
+├── README.md                                  # Guia tecnica del stack en Rust
+├── crates/protocol-rover/                     # Crate no_std PaqueteRover (6 bytes)
+├── crates/hmi-gui/                            # Aplicacion de pilotaje nativa egui
+├── crates/firmware-tx-esp32/                  # Firmware transmisor en Rust
+└── crates/firmware-rx-esp32/                  # Firmware receptor en Rust
 ```
 
 ---
@@ -211,6 +246,7 @@ HMI-Lunar-Rover/
 3. **Control en Lazo Cerrado:** Reemplazo de los motores amarillos básicos de corriente continua por motores con **encoders magnéticos de efecto Hall** de alta resolución para implementar algoritmos PID de velocidad y posición.
 4. **Placa PCB de Producción:** Finalización del esquemático y ruteado de la PCB por parte de Lucas para eliminar cableado tipo protoboard.
 5. **Telemetría de Visión Inalámbrica:** Montaje de módulo **ESP32-CAM** sobre un servo independiente de 180° para transmisión de video en tiempo real vía Wi-Fi, operando en red separada del canal de tracción por RF24.
+6. **Mapeo 3D en Entornos Confinados / Cuevas:** Implementación del sistema híbrido de escaneo mediante LiDAR 2D DToF (LDROBOT LD06) montado sobre servomotor de cabeceo (pitch de -45° a +45°) procesado y visualizado en la aplicación nativa en Rust (`hmi-gui`) para reconstrucción en tiempo real de nubes de puntos 3D. Consulte el estudio técnico completo en [`03_Documentacion_y_Guias/Guias/ESTUDIO_VIABILIDAD_MAPEO_LIDAR_CAMARA_RUST.md`](03_Documentacion_y_Guias/Guias/ESTUDIO_VIABILIDAD_MAPEO_LIDAR_CAMARA_RUST.md).
 
 ---
 

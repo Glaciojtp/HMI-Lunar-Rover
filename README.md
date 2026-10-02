@@ -72,8 +72,9 @@ A continuación se detalla cada código fuente del proyecto, su ubicación exact
 | Archivo `.ino` | Carpeta en el Repositorio | Microcontrolador Previsto (Última Versión) | Rol en el Sistema |
 |---|---|---|---|
 | **`Ejecutor_ArduinoNano_ESP32.ino`** | [`01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32/`](01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32) | **Arduino Nano ESP32** (ESP32-S3 a 3.3V) [Oficial] | **Receptor Oficial del Rover:** 6 motores + 4 servos independientes. |
+| **`Transmisor_ArduinoNano_ESP32.ino`** | [`02_Debug_y_Pruebas/Firmware_Debug/Transmisor_ArduinoNano_ESP32/`](02_Debug_y_Pruebas/Firmware_Debug/Transmisor_ArduinoNano_ESP32) | **Arduino Nano ESP32** (ESP32-S3 a 3.3V) [Oficial] | **Transmisor PC Oficial:** Puente USB-RF con handshake y LED RGB. |
 | **`Joystick_Arduino_Nano.ino`** | [`01_Oficial/Mando_Joystick_Fisico/Joystick_Arduino_Nano/`](01_Oficial/Mando_Joystick_Fisico/Joystick_Arduino_Nano) | **Arduino Nano Clásico (ATmega328P)** o **Arduino Nano ESP32** | **Mando Joystick Físico Autónomo:** Control inalámbrico sin PC. |
-| **`Control_ESP32_C3_Optimizado.ino`** | [`01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado/`](01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado) | **ESP32-C3 SuperMini** / **LOLIN C3 Mini** (RISC-V a 3.3V) | **Transmisor PC:** Puente USB Serial a Radiofrecuencia RF24. |
+| **`Control_ESP32_C3_Optimizado.ino`** | [`01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado/`](01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado) | **ESP32-C3 SuperMini** / **LOLIN C3 Mini** (RISC-V a 3.3V) | **Transmisor PC Alternativo:** Puente USB Serial a Radiofrecuencia RF24. |
 | **`Control_ESP32_C3_Debug.ino`** | [`02_Debug_y_Pruebas/Firmware_Debug/Control_ESP32_C3_Debug/`](02_Debug_y_Pruebas/Firmware_Debug/Control_ESP32_C3_Debug) | **ESP32-C3 SuperMini** / **LOLIN C3 Mini** | **Transmisor Modo Debug:** Reporte de volcado HEX y métricas de tasa. |
 | **`Ejecutor_ArduinoMKR_Optimizado.ino`** | [`01_Oficial/Receptor_Rover_MKR1310/Ejecutor_ArduinoMKR_Optimizado/`](01_Oficial/Receptor_Rover_MKR1310/Ejecutor_ArduinoMKR_Optimizado) | **Arduino MKR 1310** (SAMD21 ARM Cortex-M0+ a 3.3V) | **Receptor Alternativo:** Versión previa con drenaje rápido y failsafe. |
 | **`Ejecutor_ArduinoMKR_Debug.ino`** | [`02_Debug_y_Pruebas/Firmware_Debug/Ejecutor_ArduinoMKR_Debug/`](02_Debug_y_Pruebas/Firmware_Debug/Ejecutor_ArduinoMKR_Debug) | **Arduino MKR 1310** (SAMD21 ARM Cortex-M0+ a 3.3V) | **Receptor Modo Debug:** Validación cruzada TX/RX y telemetría de retorno. |
@@ -141,19 +142,30 @@ A continuación se detalla cada código fuente del proyecto, su ubicación exact
 
 ## Software HMI de Estacion Terrena (Windows)
 
-Para operar el Rover desde la computadora, el repositorio incluye dos interfaces gráficas desarrolladas en Python con Tkinter, completamente libres de dependencias complejas y con detección inteligente de puertos COM:
+Para operar el Rover desde la computadora, el repositorio incluye interfaces graficas especializadas tanto en Python (Tkinter) como en Rust nativo (egui), libres de dependencias complejas y con deteccion inteligente de puertos COM:
 
-* **[`HMI_Rover_V2.py`](01_Oficial/HMI/HMI_Rover_V2.py):** Interfaz principal de pilotaje con telemetría en tiempo real, digital twin 2D, sliders de calibración independiente de potencia (trims 0% a 150%) y selector de modos (Ackermann, Cangrejo y Giro 360°).
-* **[`HMI_Rover_Debug.py`](02_Debug_y_Pruebas/HMI_Debug/HMI_Rover_Debug.py):** Herramienta de diagnóstico de laboratorio con validación cruzada TX <-> RX en vivo, cálculo de latencia en milisegundos y registro de paquetes FIFO.
+* **[`HMI_Rover_V2.py`](01_Oficial/HMI/HMI_Rover_V2.py):** Interfaz principal de pilotaje en produccion con telemetria en tiempo real, digital twin 2D, sliders de calibracion independiente de potencia (trims 0% a 150%) y selector de modos (Ackermann, Cangrejo y Giro 360°).
+* **[`HMI_Rover_Debug.py`](02_Debug_y_Pruebas/HMI_Debug/HMI_Rover_Debug.py):** Suite de depuracion avanzada y banco de pruebas con:
+  - **Matriz de Perfiles de Hardware (`hardware_profiles.py`):** Autodeteccion pasiva por USB VID:PID y confirmacion activa por handshake (`IDENT` -> `ID:<PLACA>:<ROL>:<VERSION>`). Arduino Nano ESP32 como perfil oficial predeterminado.
+  - **Motor de Flasheo en 1 Clic (`flasher_engine.py`):** Compilacion y subida asincrona de firmware para TX y RX directamente desde la GUI mediante `arduino-cli` o fallback a `esptool`.
+  - **Flujo de Calibracion Pre-Despliegue:** Sincronizacion de trims y centros de servos con persistencia en memoria no volatil (`PERSIST_NVS`) y boton de liberacion segura de puerto para operacion en campo por bateria.
+* **Stack Paralelo Nativo en Rust (`HMI-Lunar-Rover-Rust`):**
+  - Aplicacion de escritorio nativa `hmi-gui` renderizada por GPU con `eframe` (egui).
+  - Crate `protocol-rover` compatible con `#![no_std]` y paquetes binarios empaquetados de 6 bytes.
+  - Firmwares embebidos en Rust para el transmisor y receptor (`firmware-tx-esp32` y `firmware-rx-esp32`).
 
-### ¿Cómo correr la HMI en Windows sin complicaciones?
-Elegí el método que prefieras:
+### ¿Como correr la HMI en Windows sin complicaciones?
+Elegi el metodo que prefieras:
 1. **Ejecutable Directo (Sin instalar Python ni nada):**  
-   Hacé doble clic en [`Compilar_HMI_a_EXE.bat`](Compilar_HMI_a_EXE.bat) para generar tu archivo **`HMI_Rover_Lunar_V2.exe`**. Luego, cualquier compañero solo tiene que hacer doble clic en el `.exe`.
-2. **Lanzador Automático:**  
-   Hacé doble clic en [`Lanzar_HMI_Rover.bat`](Lanzar_HMI_Rover.bat). Si no tenés la librería `pyserial`, el script la detecta y la instala automáticamente en 2 segundos.
+   Hace doble clic en [`Compilar_HMI_a_EXE.bat`](Compilar_HMI_a_EXE.bat) para generar tu archivo **`HMI_Rover_Lunar_V2.exe`**. Luego, cualquier companero solo tiene que hacer doble clic en el `.exe`.
+2. **Lanzador Automatico de Produccion:**  
+   Hace doble clic en [`Lanzar_HMI_Rover.bat`](Lanzar_HMI_Rover.bat). Si no tenes la libreria `pyserial`, el script la detecta y la instala automaticamente en 2 segundos.
+3. **Lanzador de Modo Diagnostico y Flasheo:**  
+   Hace doble clic en [`02_Debug_y_Pruebas/Lanzar_HMI_Debug.bat`](02_Debug_y_Pruebas/Lanzar_HMI_Debug.bat).
+4. **Lanzador del Stack en Rust:**  
+   Abrir terminal en `C:\Users\joaqu\Desktop\HMI-Lunar-Rover-Rust` y ejecutar `cargo run -p hmi-gui`.
 
-> *Manual de usuario en 1 minuto:* Consultá [`03_Documentacion_y_Guias/Guias/GUIA_RAPIDA_EQUIPO.md`](03_Documentacion_y_Guias/Guias/GUIA_RAPIDA_EQUIPO.md).
+> *Manual de usuario en 1 minuto:* Consulta [`03_Documentacion_y_Guias/Guias/GUIA_RAPIDA_EQUIPO.md`](03_Documentacion_y_Guias/Guias/GUIA_RAPIDA_EQUIPO.md).
 
 ---
 
@@ -232,6 +244,9 @@ HMI-Lunar-Rover/
 ## Documentacion Tecnica Detallada
 
 * Para profundizar en los detalles de conexionado pin a pin y pines libres del receptor: [`03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md`](03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md).
+* Para consultar el estudio de viabilidad y costos de LiDAR, camaras y mapeo 3D en Rust para cuevas: [`03_Documentacion_y_Guias/Guias/ESTUDIO_VIABILIDAD_MAPEO_LIDAR_CAMARA_RUST.md`](03_Documentacion_y_Guias/Guias/ESTUDIO_VIABILIDAD_MAPEO_LIDAR_CAMARA_RUST.md).
 * Para armar el mando físico con joysticks y potenciómetro: [`03_Documentacion_y_Guias/Guias/GUIA_JOYSTICK_HARDWARE.md`](03_Documentacion_y_Guias/Guias/GUIA_JOYSTICK_HARDWARE.md).
 * Para conocer las directrices completas de desarrollo y arquitectura de software: [`AGENTS.md`](AGENTS.md).
 * Para evaluar el análisis de MicroPython y la futura plataforma Arduino UNO Q: [`03_Documentacion_y_Guias/Guias/EVALUACION_TECNICA_MICROPYTHON_ARDUINO_Q.md`](03_Documentacion_y_Guias/Guias/EVALUACION_TECNICA_MICROPYTHON_ARDUINO_Q.md).
+* Para explorar el codigo y documentacion del stack paralelo nativo en Rust: [`C:\Users\joaqu\Desktop\HMI-Lunar-Rover-Rust`](../HMI-Lunar-Rover-Rust).
+

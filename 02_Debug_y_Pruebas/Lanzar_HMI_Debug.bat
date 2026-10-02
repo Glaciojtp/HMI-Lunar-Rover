@@ -3,7 +3,7 @@ title HMI Rover Lunar V2.0 — Modo Debug y Telemetria Windows
 cd /d "%~dp0"
 
 echo ========================================================
-echo   🛰️ HMI ROVER LUNAR V2.0 — INICIANDO MODO DEBUG
+echo   [INICIO] HMI ROVER LUNAR V2.0 - MODO DEBUG Y FLASHEO
 echo ========================================================
 echo.
 
