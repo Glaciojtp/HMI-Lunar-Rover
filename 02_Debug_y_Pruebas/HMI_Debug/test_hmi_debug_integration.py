@@ -409,7 +409,9 @@ class TestSincronizacionYLiberacion:
         with patch.object(app_debug.flasher_engine, "liberar_puerto", return_value=True) as mock_liberar:
             app_debug.liberar_rx_campo()
 
-            mock_liberar.assert_called_once_with(mock_serial, callback_log=pytest.approx(object, rel=1e-3) if False else mock_liberar.call_args[1]["callback_log"])
+            mock_liberar.assert_called_once()
+            assert mock_liberar.call_args[0][0] == mock_serial
+            assert callable(mock_liberar.call_args[1]["callback_log"])
             assert app_debug.conectado_rx is False
             assert app_debug.serial_rx is None
             app_debug.badge_rx.config.assert_called_with(

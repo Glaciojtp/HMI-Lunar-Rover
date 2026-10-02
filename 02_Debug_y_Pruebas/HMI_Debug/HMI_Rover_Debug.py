@@ -79,6 +79,8 @@ class HMIRoverDebug:
         self.registry = HardwareProfileRegistry()
         self.flasher_engine = FlasherEngine(repo_root=Path(_dir_actual).resolve().parents[1])
         self.flasheando = False
+        self.sincronizando_calib = False
+        self.pausar_lectura_rx = False
 
         # Perfiles seleccionados por defecto (Nano ESP32 tanto para TX como para RX)
         self.perfil_tx = tk.StringVar(value=PERFIL_DEFAULT_ID) if tk else None
@@ -1023,6 +1025,11 @@ class HMIRoverDebug:
         rol_tx = (rol == "TX")
         estaba_conectado = self.conectado_tx if rol_tx else self.conectado_rx
 
+        if rol_tx:
+            self.root.after(0, lambda: self.badge_tx.config(text="[TX FLASHEANDO]", bg="#78350f", fg="#fde047"))
+        else:
+            self.root.after(0, lambda: self.badge_rx.config(text="[RX FLASHEANDO]", bg="#78350f", fg="#fde047"))
+
         if estaba_conectado:
             self.root.after(0, self.log_consola, "SYS", f"[SYS] Cerrando puerto {puerto} temporalmente para flasheo de {rol}...")
             if rol_tx:
@@ -1032,7 +1039,6 @@ class HMIRoverDebug:
                         self.serial_tx.close()
                     except Exception:
                         pass
-                self.root.after(0, lambda: self.badge_tx.config(text="[TX FLASHEANDO]", bg="#78350f", fg="#fde047"))
                 self.root.after(0, lambda: self.btn_conectar_tx.config(text="Conectar TX", bg="#00f5d4", fg="#0c0e17"))
             else:
                 self.conectado_rx = False
@@ -1041,7 +1047,6 @@ class HMIRoverDebug:
                         self.serial_rx.close()
                     except Exception:
                         pass
-                self.root.after(0, lambda: self.badge_rx.config(text="[RX FLASHEANDO]", bg="#78350f", fg="#fde047"))
                 self.root.after(0, lambda: self.btn_conectar_rx.config(text="Conectar RX", bg="#fbbf24", fg="#0c0e17"))
 
         time.sleep(0.3)
@@ -1091,6 +1096,11 @@ class HMIRoverDebug:
                 messagebox.showwarning("Atencion", "Conecte primero el puerto RX para sincronizar la calibracion.")
             return
 
+        if getattr(self, "sincronizando_calib", False):
+            if messagebox:
+                messagebox.showwarning("Sincronizacion en curso", "Ya hay una sincronizacion de calibracion en progreso.")
+            return
+
         trims = [
             self.trim_m1.get(),
             self.trim_m2.get(),
@@ -1107,21 +1117,27 @@ class HMIRoverDebug:
         ]
 
         def tarea_sincronizacion():
+            self.sincronizando_calib = True
+            self.pausar_lectura_rx = True
             def cb_log(msg):
                 self.root.after(0, self.log_consola, "SYS", msg)
 
-            cb_log("[SYS] Sincronizando parametros de calibracion con el receptor...")
-            exito = self.flasher_engine.sincronizar_calibracion(
-                serial_conn=self.serial_rx,
-                trims=trims,
-                servos=servos,
-                persistir_nvs=True,
-                callback_log=cb_log,
-            )
-            if exito:
-                self.root.after(0, lambda: self.badge_rx.config(text="[CALIB SINCRONIZADA]", bg="#064e3b", fg="#34d399"))
-            else:
-                self.root.after(0, lambda: self.badge_rx.config(text="[ERROR CALIB]", bg="#450a0a", fg="#f87171"))
+            try:
+                cb_log("[SYS] Sincronizando parametros de calibracion con el receptor...")
+                exito = self.flasher_engine.sincronizar_calibracion(
+                    serial_conn=self.serial_rx,
+                    trims=trims,
+                    servos=servos,
+                    persistir_nvs=True,
+                    callback_log=cb_log,
+                )
+                if exito:
+                    self.root.after(0, lambda: self.badge_rx.config(text="[CALIB SINCRONIZADA]", bg="#064e3b", fg="#34d399"))
+                else:
+                    self.root.after(0, lambda: self.badge_rx.config(text="[ERROR CALIB]", bg="#450a0a", fg="#f87171"))
+            finally:
+                self.pausar_lectura_rx = False
+                self.sincronizando_calib = False
 
         threading.Thread(target=tarea_sincronizacion, daemon=True).start()
 
@@ -1389,6 +1405,9 @@ class HMIRoverDebug:
 
     def bucle_lectura_rx(self):
         while self.ejecutando:
+            if getattr(self, "pausar_lectura_rx", False):
+                time.sleep(0.02)
+                continue
             if self.conectado_rx and self.serial_rx and self.serial_rx.is_open:
                 try:
                     linea = self.serial_rx.readline().decode('utf-8', errors='ignore').strip()
