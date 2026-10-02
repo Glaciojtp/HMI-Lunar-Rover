@@ -2,7 +2,7 @@
 name = "firmware-tx-esp32"
 version = "0.1.0"
 edition = "2021"
-description = "Firmware de transmision RF en Rust para ESP32"
+description = "Firmware de transmision RF en Rust para Arduino Nano ESP32 (ESP32-S3)"
 authors = ["Equipo Rover Lunar V2.0"]
 license = "MIT OR Apache-2.0"
 
