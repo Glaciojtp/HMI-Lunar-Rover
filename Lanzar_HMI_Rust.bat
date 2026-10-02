@@ -32,7 +32,7 @@ where wsl >nul 2>&1
 if not errorlevel 1 (
     echo [INFO] Cargo no detectado en el PATH de Windows.
     echo [OK] Ejecutando HMI en Rust a traves de WSL / WSLg...
-    wsl bash -c "export PATH=\"$HOME/.cargo/bin:$PATH\"; cd /mnt/c/Users/joaqu/Desktop/HMI-Lunar-Rover-Rust && cargo run -p hmi-gui"
+    wsl bash -lc "cd /mnt/c/Users/joaqu/Desktop/HMI-Lunar-Rover-Rust && cargo run -p hmi-gui"
     if errorlevel 1 (
         echo.
         echo [ERROR] Fallo la ejecucion de la HMI a traves de WSL (codigo %errorlevel%).
@@ -49,3 +49,6 @@ pause
 exit /b 1
 
 :fin
+echo.
+echo [INFO] Sesion de HMI finalizada.
+pause
