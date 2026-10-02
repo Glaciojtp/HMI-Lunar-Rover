@@ -1,0 +1,8 @@
+[workspace]
+members = [
+    "crates/protocol-rover",
+    "crates/hmi-gui",
+    "crates/firmware-tx-esp32",
+    "crates/firmware-rx-esp32",
+]
+resolver = "2"

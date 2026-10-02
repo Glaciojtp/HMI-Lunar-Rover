@@ -1,0 +1,10 @@
+[package]
+name = "firmware-rx-esp32"
+version = "0.1.0"
+edition = "2021"
+description = "Firmware de recepcion y control de actuadores en Rust para ESP32"
+authors = ["Equipo Rover Lunar V2.0"]
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+protocol-rover = { path = "../protocol-rover" }

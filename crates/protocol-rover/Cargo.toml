@@ -1,0 +1,11 @@
+[package]
+name = "protocol-rover"
+version = "0.1.0"
+edition = "2021"
+description = "Crate no_std del protocolo binario de comunicacion para el Rover Lunar V2.0"
+authors = ["Equipo Rover Lunar V2.0"]
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+
+[dev-dependencies]

@@ -1,0 +1,10 @@
+[package]
+name = "hmi-gui"
+version = "0.1.0"
+edition = "2021"
+description = "Interfaz grafica de usuario (HMI) en Rust para el Rover Lunar V2.0"
+authors = ["Equipo Rover Lunar V2.0"]
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+protocol-rover = { path = "../protocol-rover" }
