@@ -204,7 +204,7 @@ class HMIRoverDebug:
         # 1. BARRA SUPERIOR: DOBLE CONEXION SERIAL (TX & RX) Y APROVISIONAMIENTO
         # =========================================================================
         top_bar = ttk.Frame(self.root, style="Card.TFrame", padding=(12, 6))
-        top_bar.pack(fill="x", padx=12, pady=(8, 4))
+        top_bar.pack(side="top", fill="x", padx=12, pady=(8, 4))
 
         # --- FILA 1: PUERTOS, PERFILES Y CONEXIONES ---
         row_conn = ttk.Frame(top_bar, style="Card.TFrame")
@@ -236,7 +236,7 @@ class HMIRoverDebug:
                                       font=("Segoe UI", 8, "bold"), command=self.reset_hw_tx, relief="flat", padx=4)
         self.btn_reset_tx.pack(side="left", padx=2)
 
-        self.badge_tx = tk.Label(frm_tx_conn, text="[TX OFF]", bg="#2a2e3f", fg="#f87171", font=("Segoe UI", 8, "bold"), padx=5)
+        self.badge_tx = tk.Label(frm_tx_conn, text="[TX OFF]", width=10, bg="#2a2e3f", fg="#f87171", font=("Segoe UI", 8, "bold"), padx=5)
         self.badge_tx.pack(side="left", padx=2)
 
         # Separador vertical
@@ -263,7 +263,7 @@ class HMIRoverDebug:
                                      font=("Segoe UI", 8, "bold"), command=self.ident_o_ping_rx, relief="flat", padx=4)
         self.btn_ping_rx.pack(side="left", padx=2)
 
-        self.badge_rx = tk.Label(frm_rx_conn, text="[RX OFF]", bg="#2a2e3f", fg="#f87171", font=("Segoe UI", 8, "bold"), padx=5)
+        self.badge_rx = tk.Label(frm_rx_conn, text="[RX OFF]", width=10, bg="#2a2e3f", fg="#f87171", font=("Segoe UI", 8, "bold"), padx=5)
         self.badge_rx.pack(side="left", padx=2)
 
         btn_refrescar = tk.Button(row_conn, text="Refrescar Puertos", bg="#334155", fg="#ffffff", font=("Segoe UI", 8, "bold"),
@@ -271,7 +271,7 @@ class HMIRoverDebug:
         btn_refrescar.pack(side="left", padx=3)
 
         # Insignia de Validacion Cruzada TX <-> RX a la derecha
-        self.badge_validacion = tk.Label(row_conn, text="[VALIDACION: EN ESPERA]", bg="#2a2e3f", fg="#94a3b8",
+        self.badge_validacion = tk.Label(row_conn, text="[VALIDACION: EN ESPERA]", width=28, bg="#2a2e3f", fg="#94a3b8",
                                          font=("Segoe UI", 9, "bold"), padx=8, pady=2)
         self.badge_validacion.pack(side="right", padx=3)
 
@@ -310,14 +310,21 @@ class HMIRoverDebug:
         # =========================================================================
         # 2. CUERPO PRINCIPAL: IZQUIERDA (CONTROLES), DERECHA (DOBLE ESQUEMA 2D)
         # =========================================================================
+        # Empacar consola primero en el fondo para garantizar posicion vertical 100% estatica
+        card_consola = ttk.Frame(self.root, style="Card.TFrame", padding=(12, 6))
+        card_consola.pack(side="bottom", fill="x", padx=12, pady=(4, 8))
+
         main_content = ttk.Frame(self.root, style="Dark.TFrame")
-        main_content.pack(fill="both", expand=True, padx=12, pady=4)
+        main_content.pack(side="top", fill="both", expand=True, padx=12, pady=4)
+        main_content.columnconfigure(0, weight=1, uniform="cols_principales")
+        main_content.columnconfigure(1, weight=1, uniform="cols_principales")
+        main_content.rowconfigure(0, weight=1)
 
         col_izq = ttk.Frame(main_content, style="Dark.TFrame")
-        col_izq.pack(side="left", fill="both", expand=True, padx=(0, 6))
+        col_izq.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
 
         col_der = ttk.Frame(main_content, style="Dark.TFrame")
-        col_der.pack(side="right", fill="both", expand=True, padx=(6, 0))
+        col_der.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
 
         # --- PANEL TRIMS DE MOTORES ---
         card_motores = ttk.Frame(col_izq, style="Card.TFrame", padding=8)
@@ -331,9 +338,11 @@ class HMIRoverDebug:
 
         grid_m = ttk.Frame(card_motores, style="Card.TFrame")
         grid_m.pack(fill="x")
+        grid_m.columnconfigure(0, weight=1, uniform="trims_cols")
+        grid_m.columnconfigure(1, weight=1, uniform="trims_cols")
 
         col_m_izq = ttk.Frame(grid_m, style="Card.TFrame")
-        col_m_izq.pack(side="left", fill="both", expand=True, padx=(0, 4))
+        col_m_izq.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
         self.crear_slider_trim(col_m_izq, 1, "M1 (Del. Izq)", self.trim_m1)
         self.crear_slider_trim(col_m_izq, 2, "M2 (Med. Izq)", self.trim_m2)
         self.crear_slider_trim(col_m_izq, 3, "M3 (Tras. Izq)", self.trim_m3)
@@ -345,7 +354,7 @@ class HMIRoverDebug:
                  bg="#151824", fg="#00f5d4", highlightthickness=0, command=self.sync_master_izq).pack(side="right", fill="x", expand=True)
 
         col_m_der = ttk.Frame(grid_m, style="Card.TFrame")
-        col_m_der.pack(side="right", fill="both", expand=True, padx=(4, 0))
+        col_m_der.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
         self.crear_slider_trim(col_m_der, 4, "M4 (Del. Der)", self.trim_m4)
         self.crear_slider_trim(col_m_der, 5, "M5 (Med. Der)", self.trim_m5)
         self.crear_slider_trim(col_m_der, 6, "M6 (Tras. Der)", self.trim_m6)
@@ -364,14 +373,16 @@ class HMIRoverDebug:
         self.lbl_header_servos.pack(anchor="w", pady=(0, 2))
         grid_s = ttk.Frame(card_servos, style="Card.TFrame")
         grid_s.pack(fill="x")
+        grid_s.columnconfigure(0, weight=1, uniform="servos_cols")
+        grid_s.columnconfigure(1, weight=1, uniform="servos_cols")
 
         col_s_del = ttk.Frame(grid_s, style="Card.TFrame")
-        col_s_del.pack(side="left", fill="both", expand=True, padx=(0, 4))
+        col_s_del.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
         self.crear_slider_servo(col_s_del, 1, "S1: Del. Izq", self.ang_s1)
         self.crear_slider_servo(col_s_del, 2, "S2: Del. Der", self.ang_s2)
 
         col_s_tras = ttk.Frame(grid_s, style="Card.TFrame")
-        col_s_tras.pack(side="right", fill="both", expand=True, padx=(4, 0))
+        col_s_tras.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
         self.crear_slider_servo(col_s_tras, 3, "S3: Tras. Izq", self.ang_s3)
         self.crear_slider_servo(col_s_tras, 4, "S4: Tras. Der", self.ang_s4)
 
@@ -420,7 +431,7 @@ class HMIRoverDebug:
         ttk.Label(frm_s1, text="STICK 1 (L)", font=("Segoe UI", 8, "bold"), style="SubHeader.TLabel").pack(anchor="center")
         self.canvas_joy_s1 = tk.Canvas(frm_s1, width=64, height=64, bg="#08090f", highlightthickness=1, highlightbackground="#334155")
         self.canvas_joy_s1.pack(anchor="center", pady=1)
-        self.lbl_joy_s1 = ttk.Label(frm_s1, text="X: 0% | Y: 0%", font=("Consolas", 7), style="SubHeader.TLabel")
+        self.lbl_joy_s1 = ttk.Label(frm_s1, text="X: 0% | Y: 0%", font=("Consolas", 7), style="SubHeader.TLabel", width=18, anchor="center")
         self.lbl_joy_s1.pack(anchor="center")
 
         # Stick 2 (R)
@@ -429,7 +440,7 @@ class HMIRoverDebug:
         ttk.Label(frm_s2, text="STICK 2 (R)", font=("Segoe UI", 8, "bold"), style="SubHeader.TLabel").pack(anchor="center")
         self.canvas_joy_s2 = tk.Canvas(frm_s2, width=64, height=64, bg="#08090f", highlightthickness=1, highlightbackground="#334155")
         self.canvas_joy_s2.pack(anchor="center", pady=1)
-        self.lbl_joy_s2 = ttk.Label(frm_s2, text="X: 0% | Y: 0%", font=("Consolas", 7), style="SubHeader.TLabel")
+        self.lbl_joy_s2 = ttk.Label(frm_s2, text="X: 0% | Y: 0%", font=("Consolas", 7), style="SubHeader.TLabel", width=18, anchor="center")
         self.lbl_joy_s2.pack(anchor="center")
 
         # Controls & Badges
@@ -437,7 +448,7 @@ class HMIRoverDebug:
         frm_joy_ctrls.pack(side="left", fill="both", expand=True)
 
         ttk.Label(frm_joy_ctrls, text="POTENCIOMETRO:", font=("Segoe UI", 8, "bold"), style="SubHeader.TLabel").pack(anchor="w")
-        self.lbl_joy_pot = ttk.Label(frm_joy_ctrls, text="Pot: 150 / 255 (59%)", style="Value.TLabel")
+        self.lbl_joy_pot = ttk.Label(frm_joy_ctrls, text="Pot: 150 / 255 (59%)", style="Value.TLabel", width=22)
         self.lbl_joy_pot.pack(anchor="w", pady=(0, 2))
 
         frm_badges = ttk.Frame(frm_joy_ctrls, style="Card.TFrame")
@@ -472,23 +483,25 @@ class HMIRoverDebug:
 
         frm_canvases = ttk.Frame(card_dual_esquema, style="Card.TFrame")
         frm_canvases.pack(fill="x")
+        frm_canvases.columnconfigure(0, weight=1, uniform="canvases_cols")
+        frm_canvases.columnconfigure(1, weight=1, uniform="canvases_cols")
 
         # Canvas TX
         frm_c_tx = ttk.Frame(frm_canvases, style="CardDark.TFrame", padding=4)
-        frm_c_tx.pack(side="left", fill="both", expand=True, padx=(0, 4))
+        frm_c_tx.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
         tk.Label(frm_c_tx, text="1. COMANDO TRANSMITIDO (TX)", bg="#11131c", fg="#00f5d4", font=("Segoe UI", 8, "bold")).pack(anchor="center")
         self.canvas_tx = tk.Canvas(frm_c_tx, width=175, height=175, bg="#08090f", highlightthickness=1, highlightbackground="#00f5d4")
         self.canvas_tx.pack(anchor="center", pady=2)
-        self.lbl_tx_valores = tk.Label(frm_c_tx, text="Izq: 0 | Der: 0 | S:[90,90,90,90]", bg="#11131c", fg="#94a3b8", font=("Consolas", 8))
+        self.lbl_tx_valores = tk.Label(frm_c_tx, text="Izq: 0 | Der: 0 | S:[90,90,90,90]", width=38, bg="#11131c", fg="#94a3b8", font=("Consolas", 8), anchor="center")
         self.lbl_tx_valores.pack(anchor="center")
 
         # Canvas RX
         frm_c_rx = ttk.Frame(frm_canvases, style="CardDark.TFrame", padding=4)
-        frm_c_rx.pack(side="right", fill="both", expand=True, padx=(4, 0))
+        frm_c_rx.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
         tk.Label(frm_c_rx, text="2. TELEMETRIA RECIBIDA (RX)", bg="#11131c", fg="#fbbf24", font=("Segoe UI", 8, "bold")).pack(anchor="center")
         self.canvas_rx = tk.Canvas(frm_c_rx, width=175, height=175, bg="#08090f", highlightthickness=1, highlightbackground="#fbbf24")
         self.canvas_rx.pack(anchor="center", pady=2)
-        self.lbl_rx_valores = tk.Label(frm_c_rx, text="Izq: -- | Der: -- | S:[--,--,--,--]", bg="#11131c", fg="#94a3b8", font=("Consolas", 8))
+        self.lbl_rx_valores = tk.Label(frm_c_rx, text="Izq: -- | Der: -- | S:[--,--,--,--]", width=38, bg="#11131c", fg="#94a3b8", font=("Consolas", 8), anchor="center")
         self.lbl_rx_valores.pack(anchor="center")
 
         # Botonera Mandos WASD
@@ -497,33 +510,39 @@ class HMIRoverDebug:
 
         grid_botones = ttk.Frame(frm_mandos, style="Card.TFrame")
         grid_botones.pack(anchor="center")
+        grid_botones.columnconfigure(0, weight=1, minsize=65, uniform="wasd_c")
+        grid_botones.columnconfigure(1, weight=1, minsize=75, uniform="wasd_c")
+        grid_botones.columnconfigure(2, weight=1, minsize=65, uniform="wasd_c")
+        grid_botones.rowconfigure(0, minsize=42, uniform="wasd_r")
+        grid_botones.rowconfigure(1, minsize=42, uniform="wasd_r")
+        grid_botones.rowconfigure(2, minsize=42, uniform="wasd_r")
 
         self.btn_q = tk.Button(grid_botones, text="Q", width=6, height=2, bg="#334155", fg="#00f5d4",
-                               font=("Segoe UI", 8, "bold"), relief="flat", command=lambda: self.activar_macro("PIVOT_IZQ"))
+                               font=("Segoe UI", 8, "bold"), relief="flat", takefocus=0, command=lambda: self.activar_macro("PIVOT_IZQ"))
         self.btn_q.grid(row=0, column=0, padx=2, pady=2)
 
         self.btn_w = tk.Button(grid_botones, text="W", width=8, height=2, bg="#334155", fg="#ffffff",
-                               font=("Segoe UI", 8, "bold"), relief="flat")
+                               font=("Segoe UI", 8, "bold"), relief="flat", takefocus=0)
         self.btn_w.grid(row=0, column=1, padx=2, pady=2)
 
         self.btn_e = tk.Button(grid_botones, text="E", width=6, height=2, bg="#334155", fg="#00f5d4",
-                               font=("Segoe UI", 8, "bold"), relief="flat", command=lambda: self.activar_macro("PIVOT_DER"))
+                               font=("Segoe UI", 8, "bold"), relief="flat", takefocus=0, command=lambda: self.activar_macro("PIVOT_DER"))
         self.btn_e.grid(row=0, column=2, padx=2, pady=2)
 
         self.btn_a = tk.Button(grid_botones, text="A", width=6, height=2, bg="#334155", fg="#ffffff",
-                               font=("Segoe UI", 8, "bold"), relief="flat")
+                               font=("Segoe UI", 8, "bold"), relief="flat", takefocus=0)
         self.btn_a.grid(row=1, column=0, padx=2, pady=2)
 
         self.btn_stop = tk.Button(grid_botones, text="STOP", width=8, height=2, bg="#e63946", fg="#ffffff",
-                                  font=("Segoe UI", 8, "bold"), relief="flat", command=self.parar_emergencia)
+                                  font=("Segoe UI", 8, "bold"), relief="flat", takefocus=0, command=self.parar_emergencia)
         self.btn_stop.grid(row=1, column=1, padx=2, pady=2)
 
         self.btn_d = tk.Button(grid_botones, text="D", width=6, height=2, bg="#334155", fg="#ffffff",
-                               font=("Segoe UI", 8, "bold"), relief="flat")
+                               font=("Segoe UI", 8, "bold"), relief="flat", takefocus=0)
         self.btn_d.grid(row=1, column=2, padx=2, pady=2)
 
         self.btn_s = tk.Button(grid_botones, text="S", width=8, height=2, bg="#334155", fg="#ffffff",
-                               font=("Segoe UI", 8, "bold"), relief="flat")
+                               font=("Segoe UI", 8, "bold"), relief="flat", takefocus=0)
         self.btn_s.grid(row=2, column=1, padx=2, pady=2)
 
         # Metricas Resumen
@@ -533,35 +552,32 @@ class HMIRoverDebug:
         grid_met.pack(fill="x")
 
         ttk.Label(grid_met, text="Tasa TX:", style="SubHeader.TLabel").grid(row=0, column=0, sticky="w")
-        self.lbl_met_tasa = ttk.Label(grid_met, text="0 Hz", style="Value.TLabel")
+        self.lbl_met_tasa = ttk.Label(grid_met, text="0 Hz", style="Value.TLabel", width=8)
         self.lbl_met_tasa.grid(row=0, column=1, sticky="w", padx=(4, 15))
 
         ttk.Label(grid_met, text="Paquetes TX:", style="SubHeader.TLabel").grid(row=0, column=2, sticky="w")
-        self.lbl_met_tot_tx = ttk.Label(grid_met, text="0", style="Value.TLabel")
+        self.lbl_met_tot_tx = ttk.Label(grid_met, text="0", style="Value.TLabel", width=8)
         self.lbl_met_tot_tx.grid(row=0, column=3, sticky="w", padx=(4, 15))
 
         ttk.Label(grid_met, text="Paquetes RX:", style="SubHeader.TLabel").grid(row=0, column=4, sticky="w")
-        self.lbl_met_tot_rx = ttk.Label(grid_met, text="0", style="ValueWarn.TLabel")
+        self.lbl_met_tot_rx = ttk.Label(grid_met, text="0", style="ValueWarn.TLabel", width=8)
         self.lbl_met_tot_rx.grid(row=0, column=5, sticky="w", padx=4)
 
         ttk.Label(grid_met, text="Latencia RF:", style="SubHeader.TLabel").grid(row=1, column=0, sticky="w")
-        self.lbl_met_latencia = ttk.Label(grid_met, text="-- ms", style="Value.TLabel")
+        self.lbl_met_latencia = ttk.Label(grid_met, text="-- ms", style="Value.TLabel", width=8)
         self.lbl_met_latencia.grid(row=1, column=1, sticky="w", padx=(4, 15))
 
         ttk.Label(grid_met, text="Matches 1:1:", style="SubHeader.TLabel").grid(row=1, column=2, sticky="w")
-        self.lbl_met_matches = ttk.Label(grid_met, text="0 OK", style="Value.TLabel")
+        self.lbl_met_matches = ttk.Label(grid_met, text="0 OK", style="Value.TLabel", width=8)
         self.lbl_met_matches.grid(row=1, column=3, sticky="w", padx=(4, 15))
 
         ttk.Label(grid_met, text="Discrepancias:", style="SubHeader.TLabel").grid(row=1, column=4, sticky="w")
-        self.lbl_met_mismatches = ttk.Label(grid_met, text="0", style="ValueWarn.TLabel")
+        self.lbl_met_mismatches = ttk.Label(grid_met, text="0", style="ValueWarn.TLabel", width=8)
         self.lbl_met_mismatches.grid(row=1, column=5, sticky="w", padx=4)
 
         # =========================================================================
-        # 3. TERMINAL INFERIOR MULTI-CANAL DE DEPURACION Y VALIDACION
+        # 3. TERMINAL INFERIOR MULTI-CANAL DE DEPURACION Y VALIDACION (CARD_CONSOLA)
         # =========================================================================
-        card_consola = ttk.Frame(self.root, style="Card.TFrame", padding=(12, 6))
-        card_consola.pack(fill="both", expand=True, padx=12, pady=(4, 8))
-
         frm_tit_cons = ttk.Frame(card_consola, style="Card.TFrame")
         frm_tit_cons.pack(fill="x", pady=(0, 2))
 
@@ -591,7 +607,7 @@ class HMIRoverDebug:
 
         self.txt_consola = tk.Text(frm_txt, height=8, bg="#07080d", fg="#e2e8f0",
                                    font=("Consolas", 9), insertbackground="#ffffff", relief="flat",
-                                   yscrollcommand=scroll_y.set)
+                                   takefocus=0, yscrollcommand=scroll_y.set)
         self.txt_consola.pack(side="left", fill="both", expand=True)
         scroll_y.config(command=self.txt_consola.yview)
 
@@ -1843,6 +1859,8 @@ class HMIRoverDebug:
         self.actualizar_grafico_tx()
 
     def al_mover_servo(self, val):
+        if getattr(self, '_actualizando_desde_teclas', False):
+            return
         if self.conectado_tx and self.comando_actual != "STOP":
             self.enviar_trama_actual()
         self.actualizar_grafico_tx()
@@ -1856,12 +1874,14 @@ class HMIRoverDebug:
             if not self.teclas_presionadas[k]:
                 self.teclas_presionadas[k] = True
                 self.evaluar_movimiento()
+            return "break"
 
     def evento_key_release(self, event):
         k = event.keysym.lower()
         if k in self.teclas_presionadas:
             self.teclas_presionadas[k] = False
             self.evaluar_movimiento()
+            return "break"
 
     def parar_emergencia(self):
         for k in self.teclas_presionadas:
@@ -1882,46 +1902,48 @@ class HMIRoverDebug:
         self.actualizar_botones_ui(self.comando_actual)
 
     def evaluar_movimiento(self):
-        modo = self.modo_conduccion.get()
-        nuevo = " "
-
-        if self.teclas_presionadas['space']:
+        self._actualizando_desde_teclas = True
+        try:
+            modo = self.modo_conduccion.get()
             nuevo = " "
-        elif self.teclas_presionadas['q']:
-            self.preset_point_turn()
-            nuevo = "PIVOT_IZQ"
-        elif self.teclas_presionadas['e']:
-            self.preset_point_turn()
-            nuevo = "PIVOT_DER"
-        elif self.teclas_presionadas['w']:
-            nuevo = "W"
-            if modo in ["ACKERMANN", "CRAB"]:
-                self.ang_s1.set(90); self.ang_s2.set(90); self.ang_s3.set(90); self.ang_s4.set(90)
-        elif self.teclas_presionadas['s']:
-            nuevo = "S"
-            if modo in ["ACKERMANN", "CRAB"]:
-                self.ang_s1.set(90); self.ang_s2.set(90); self.ang_s3.set(90); self.ang_s4.set(90)
-        elif self.teclas_presionadas['a']:
-            nuevo = "A"
-            if modo == "ACKERMANN":
-                if not self.invertir_servos.get():
-                    self.ang_s1.set(120); self.ang_s2.set(120); self.ang_s3.set(60); self.ang_s4.set(60)
-                else:
-                    self.ang_s1.set(60); self.ang_s2.set(60); self.ang_s3.set(120); self.ang_s4.set(120)
-            elif modo == "CRAB":
-                if self.servos_360.get():
-                    ang = 180 if not self.invertir_servos.get() else 0
-                    self.ang_s1.set(ang); self.ang_s2.set(ang); self.ang_s3.set(ang); self.ang_s4.set(ang)
-                else:
-                    ang = 135 if not self.invertir_servos.get() else 45
-                    self.ang_s1.set(ang); self.ang_s2.set(ang); self.ang_s3.set(ang); self.ang_s4.set(ang)
-        elif self.teclas_presionadas['d']:
-            nuevo = "D"
-            if modo == "ACKERMANN":
-                if not self.invertir_servos.get():
-                    self.ang_s1.set(60); self.ang_s2.set(60); self.ang_s3.set(120); self.ang_s4.set(120)
-                else:
-                    self.ang_s1.set(120); self.ang_s2.set(120); self.ang_s3.set(60); self.ang_s4.set(60)
+
+            if self.teclas_presionadas['space']:
+                nuevo = " "
+            elif self.teclas_presionadas['q']:
+                self.preset_point_turn()
+                nuevo = "PIVOT_IZQ"
+            elif self.teclas_presionadas['e']:
+                self.preset_point_turn()
+                nuevo = "PIVOT_DER"
+            elif self.teclas_presionadas['w']:
+                nuevo = "W"
+                if modo in ["ACKERMANN", "CRAB"]:
+                    self.ang_s1.set(90); self.ang_s2.set(90); self.ang_s3.set(90); self.ang_s4.set(90)
+            elif self.teclas_presionadas['s']:
+                nuevo = "S"
+                if modo in ["ACKERMANN", "CRAB"]:
+                    self.ang_s1.set(90); self.ang_s2.set(90); self.ang_s3.set(90); self.ang_s4.set(90)
+            elif self.teclas_presionadas['a']:
+                nuevo = "A"
+                if modo == "ACKERMANN":
+                    if not self.invertir_servos.get():
+                        self.ang_s1.set(120); self.ang_s2.set(120); self.ang_s3.set(60); self.ang_s4.set(60)
+                    else:
+                        self.ang_s1.set(60); self.ang_s2.set(60); self.ang_s3.set(120); self.ang_s4.set(120)
+                elif modo == "CRAB":
+                    if self.servos_360.get():
+                        ang = 180 if not self.invertir_servos.get() else 0
+                        self.ang_s1.set(ang); self.ang_s2.set(ang); self.ang_s3.set(ang); self.ang_s4.set(ang)
+                    else:
+                        ang = 135 if not self.invertir_servos.get() else 45
+                        self.ang_s1.set(ang); self.ang_s2.set(ang); self.ang_s3.set(ang); self.ang_s4.set(ang)
+            elif self.teclas_presionadas['d']:
+                nuevo = "D"
+                if modo == "ACKERMANN":
+                    if not self.invertir_servos.get():
+                        self.ang_s1.set(60); self.ang_s2.set(60); self.ang_s3.set(120); self.ang_s4.set(120)
+                    else:
+                        self.ang_s1.set(120); self.ang_s2.set(120); self.ang_s3.set(60); self.ang_s4.set(60)
             elif modo == "CRAB":
                 if self.servos_360.get():
                     ang = 0 if not self.invertir_servos.get() else 180
@@ -1930,10 +1952,12 @@ class HMIRoverDebug:
                     ang = 45 if not self.invertir_servos.get() else 135
                     self.ang_s1.set(ang); self.ang_s2.set(ang); self.ang_s3.set(ang); self.ang_s4.set(ang)
 
-        if nuevo != self.comando_actual:
-            self.comando_actual = nuevo
-            self.enviar_trama_actual()
-            self.actualizar_botones_ui(nuevo)
+            if nuevo != self.comando_actual:
+                self.comando_actual = nuevo
+                self.enviar_trama_actual()
+                self.actualizar_botones_ui(nuevo)
+        finally:
+            self._actualizando_desde_teclas = False
 
     def actualizar_botones_ui(self, cmd):
         c_off, c_on = "#334155", "#00f5d4"
