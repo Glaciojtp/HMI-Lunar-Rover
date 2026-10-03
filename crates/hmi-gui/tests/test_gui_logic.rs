@@ -389,12 +389,101 @@ fn test_simulador_plano_odometria_recta_y_giro() {
     assert!(sim.pose.x.abs() < 1e-4, "El rover debe permanecer centrado en X: x={}", sim.pose.x);
     assert!(sim.pose.radio_giro.is_infinite(), "El radio de giro en linea recta debe ser infinito");
 
-    // Integrar giro Ackermann
-    teclas.a = true;
-    let estado_giro = calcular_cinematica(&teclas, ModoConduccion::Ackermann, &trims, &servos, false, false);
-    sim.tick(&estado_giro, Some(1.0));
-    assert!(sim.pose.theta_rad != 0.0, "La guiñada debe haber cambiado al girar");
-    assert!(!sim.pose.radio_giro.is_infinite(), "El radio de giro en curva debe ser finito");
+    // Integrar giro Ackermann hacia la derecha (W + D): debe avanzar en +X y yaw positivo
+    let mut sim_der = SimuladorPlano::new();
+    let mut teclas_der = TeclasEstado::default();
+    teclas_der.w = true;
+    teclas_der.d = true;
+    let estado_der = calcular_cinematica(&teclas_der, ModoConduccion::Ackermann, &trims, &servos, false, false);
+    sim_der.tick(&estado_der, Some(1.0));
+    assert!(sim_der.pose.x > 0.0, "Giro a la derecha (D) debe desplazar el chasis hacia +X: x={}", sim_der.pose.x);
+    assert!(sim_der.pose.theta_rad > 0.0, "Giro a la derecha (D) debe incrementar yaw horariamente: theta={}", sim_der.pose.theta_rad);
+    assert!(!sim_der.pose.radio_giro.is_infinite(), "El radio de giro debe ser finito");
+
+    // Integrar giro Ackermann hacia la izquierda (W + A): debe avanzar en -X y yaw negativo
+    let mut sim_izq = SimuladorPlano::new();
+    let mut teclas_izq = TeclasEstado::default();
+    teclas_izq.w = true;
+    teclas_izq.a = true;
+    let estado_izq = calcular_cinematica(&teclas_izq, ModoConduccion::Ackermann, &trims, &servos, false, false);
+    sim_izq.tick(&estado_izq, Some(1.0));
+    assert!(sim_izq.pose.x < 0.0, "Giro a la izquierda (A) debe desplazar el chasis hacia -X: x={}", sim_izq.pose.x);
+    assert!(sim_izq.pose.theta_rad < 0.0, "Giro a la izquierda (A) debe reducir yaw antihorariamente: theta={}", sim_izq.pose.theta_rad);
+
+    // Integrar Point Turn (Giro sobre eje) E (horario/derecha) y Q (antihorario/izquierda)
+    let mut sim_piv_der = SimuladorPlano::new();
+    let mut teclas_piv_der = TeclasEstado::default();
+    teclas_piv_der.e = true;
+    let estado_piv_der = calcular_cinematica(&teclas_piv_der, ModoConduccion::PointTurn, &trims, &servos, false, false);
+    sim_piv_der.tick(&estado_piv_der, Some(1.0));
+    assert!(sim_piv_der.pose.theta_rad > 0.0, "Point Turn E debe rotar horariamente: theta={}", sim_piv_der.pose.theta_rad);
+    assert!(sim_piv_der.pose.x.abs() < 1e-3, "Point Turn no debe trasladar en X: x={}", sim_piv_der.pose.x);
+    assert!(sim_piv_der.pose.y.abs() < 1e-3, "Point Turn no debe trasladar en Y: y={}", sim_piv_der.pose.y);
+
+    let mut sim_piv_izq = SimuladorPlano::new();
+    let mut teclas_piv_izq = TeclasEstado::default();
+    teclas_piv_izq.q = true;
+    let estado_piv_izq = calcular_cinematica(&teclas_piv_izq, ModoConduccion::PointTurn, &trims, &servos, false, false);
+    sim_piv_izq.tick(&estado_piv_izq, Some(1.0));
+    assert!(sim_piv_izq.pose.theta_rad < 0.0, "Point Turn Q debe rotar antihorariamente: theta={}", sim_piv_izq.pose.theta_rad);
+}
+
+#[test]
+fn test_joystick_estado_actualizacion_y_parseo() {
+    use hmi_gui::joystick::JoystickEstado;
+
+    let mut joy = JoystickEstado::default();
+    assert_eq!(joy.stick1_x, 0.0);
+    assert_eq!(joy.stick1_y, 0.0);
+    assert_eq!(joy.pot_master, 1.0);
+
+    // Actualizacion desde teclas: W + D
+    let mut teclas = TeclasEstado::default();
+    teclas.w = true;
+    teclas.d = true;
+    joy.actualizar_desde_teclas(&teclas);
+    assert_eq!(joy.stick1_y, 1.0);
+    assert_eq!(joy.stick1_x, 1.0);
+    assert_eq!(joy.stick2_x, 0.0);
+    assert!(!joy.btn_estop);
+
+    // E-STOP con Barra Espaciadora
+    teclas.space = true;
+    joy.actualizar_desde_teclas(&teclas);
+    assert!(joy.btn_estop);
+    assert_eq!(joy.stick1_y, 0.0);
+    assert_eq!(joy.stick1_x, 0.0);
+
+    // Parseo desde trama CSV de mando fisico
+    let mut joy_csv = JoystickEstado::default();
+    let ok = joy_csv.parsear_linea_csv("JOY,768,256,512,512,1023,1\n");
+    assert!(ok);
+    assert!((joy_csv.stick1_x - 0.5).abs() < 1e-3);
+    assert!((joy_csv.stick1_y - (-0.5)).abs() < 1e-3);
+    assert_eq!(joy_csv.pot_master, 1.0);
+    assert!(joy_csv.btn_estop);
+
+    // Interpretacion semantica de maniobras
+    let trims = TrimsMotores::default();
+    let servos = AngulosServos::default();
+    let mut teclas_w_d = TeclasEstado::default();
+    teclas_w_d.w = true;
+    teclas_w_d.d = true;
+    let estado_w_d = calcular_cinematica(&teclas_w_d, ModoConduccion::Ackermann, &trims, &servos, false, false);
+    let desc_w_d = JoystickEstado::interpretar_accion(&estado_w_d, 2.5, 0.3);
+    assert!(desc_w_d.contains("CURVA ACKERMANN DERECHA"));
+
+    let mut teclas_piv_der = TeclasEstado::default();
+    teclas_piv_der.e = true;
+    let estado_piv_der = calcular_cinematica(&teclas_piv_der, ModoConduccion::PointTurn, &trims, &servos, false, false);
+    let desc_piv_der = JoystickEstado::interpretar_accion(&estado_piv_der, 0.0, 0.0);
+    assert!(desc_piv_der.contains("HORARIO / DERECHA"));
+
+    let mut teclas_stop = TeclasEstado::default();
+    teclas_stop.space = true;
+    let estado_stop = calcular_cinematica(&teclas_stop, ModoConduccion::Ackermann, &trims, &servos, false, false);
+    let desc_stop = JoystickEstado::interpretar_accion(&estado_stop, 0.0, 0.0);
+    assert!(desc_stop.contains("PARADA INMEDIATA"));
 }
 
 #[test]

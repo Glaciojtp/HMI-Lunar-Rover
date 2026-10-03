@@ -4,6 +4,7 @@
 //! serial no bloqueante con la electronica de abordo y la estacion terrena de radiofrecuencia.
 
 pub mod app;
+pub mod joystick;
 pub mod kinematics;
 pub mod profiles;
 pub mod serial_worker;

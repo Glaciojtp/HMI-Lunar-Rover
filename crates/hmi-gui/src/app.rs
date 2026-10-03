@@ -22,7 +22,16 @@ use crate::kinematics::{
 };
 use crate::profiles::{DiscoveredPort, HandshakeInfo, HardwareProfileRegistry, PERFIL_DEFAULT_ID};
 use crate::serial_worker::{SerialEvent, SerialWorkerHandle};
+use crate::joystick::JoystickEstado;
 use crate::simulation::SimuladorPlano;
+
+/// Seleccion de la vista principal del panel derecho.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum VistaDerecha {
+    Chasis,
+    Simulador,
+    JoystickDebug,
+}
 
 /// Entrada de registro en la consola de telemetria.
 #[derive(Debug, Clone)]
@@ -65,9 +74,10 @@ pub struct RoverApp {
     modo_binario: bool,
     transmision_continua: bool,
 
-    // Simulador 2D en plano
+    // Simulador 2D y panel derecho
     simulador: SimuladorPlano,
-    vista_simulacion: bool,
+    vista_derecha: VistaDerecha,
+    joystick: JoystickEstado,
 
     // Estado calculado actual
     estado_chasis: EstadoChasis,
@@ -109,7 +119,8 @@ impl Default for RoverApp {
             transmision_continua: true,
 
             simulador: SimuladorPlano::new(),
-            vista_simulacion: false,
+            vista_derecha: VistaDerecha::Simulador,
+            joystick: JoystickEstado::default(),
 
             estado_chasis: EstadoChasis {
                 traccion_izq: 0,
@@ -224,6 +235,8 @@ impl RoverApp {
     pub fn parada_emergencia(&mut self) {
         self.teclas = TeclasEstado::default();
         self.teclas.space = true;
+        self.joystick = JoystickEstado::default();
+        self.joystick.btn_estop = true;
         self.serial_worker.send_stop();
         self.servos_manuales.centrar();
         self.estado_chasis = calcular_cinematica(
@@ -290,6 +303,14 @@ impl RoverApp {
                                     Color32::from_rgb(248, 113, 113),
                                 );
                             }
+                        }
+                    } else if linea.starts_with("JOY,") {
+                        if self.joystick.parsear_linea_csv(&linea) {
+                            self.agregar_log(
+                                "[JOY]",
+                                format!("Mando fisico telemetria: {}", linea.trim()),
+                                Color32::from_rgb(0, 245, 212),
+                            );
                         }
                     } else if linea.starts_with("PONG:") {
                         self.agregar_log(
@@ -369,6 +390,9 @@ impl RoverApp {
         if self.teclas.hay_movimiento() && self.modo != ModoConduccion::Manual {
             self.servos_manuales = self.estado_chasis.servos;
         }
+
+        // Sincronizar estado virtual del joystick con la entrada de teclado
+        self.joystick.actualizar_desde_teclas(&self.teclas);
     }
 
     /// Transmite la consigna de control al hardware a una frecuencia regular (20 Hz).
@@ -821,13 +845,13 @@ impl eframe::App for RoverApp {
                 // COLUMNA DERECHA: ESQUEMA 2D Y CONSOLA DE TELEMETRIA
                 // -------------------------------------------------------------
                 columns[1].vertical(|ui| {
-                    // TARJETA 3: ESQUEMA 2D O SIMULADOR CINEMATICO EN PLANO
+                    // TARJETA 3: ESQUEMA 2D / SIMULADOR CINEMATICO / JOYSTICK DEBUG
                     egui::Frame::group(ui.style()).show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            let titulo = if self.vista_simulacion {
-                                "SIMULADOR CINEMATICO 2D (ENTORNO PLANO)"
-                            } else {
-                                "ESQUEMA 2D EN TIEMPO REAL (CANVAS ROCKER-BOGIE)"
+                            let titulo = match self.vista_derecha {
+                                VistaDerecha::Chasis => "ESQUEMA 2D EN TIEMPO REAL (CANVAS ROCKER-BOGIE)",
+                                VistaDerecha::Simulador => "SIMULADOR CINEMATICO 2D (ENTORNO PLANO)",
+                                VistaDerecha::JoystickDebug => "PANEL DE DEPURACION Y SIMULACION VIRTUAL DE JOYSTICK",
                             };
                             ui.label(
                                 egui::RichText::new(titulo)
@@ -835,209 +859,424 @@ impl eframe::App for RoverApp {
                                     .color(Color32::from_rgb(0, 245, 212)),
                             );
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.selectable_label(self.vista_simulacion, "[Simulador]").clicked() {
-                                    self.vista_simulacion = true;
+                                if ui.selectable_label(self.vista_derecha == VistaDerecha::JoystickDebug, "[Joystick Debug]").clicked() {
+                                    self.vista_derecha = VistaDerecha::JoystickDebug;
                                 }
-                                if ui.selectable_label(!self.vista_simulacion, "[Chasis]").clicked() {
-                                    self.vista_simulacion = false;
+                                if ui.selectable_label(self.vista_derecha == VistaDerecha::Simulador, "[Simulador 2D]").clicked() {
+                                    self.vista_derecha = VistaDerecha::Simulador;
+                                }
+                                if ui.selectable_label(self.vista_derecha == VistaDerecha::Chasis, "[Chasis]").clicked() {
+                                    self.vista_derecha = VistaDerecha::Chasis;
                                 }
                             });
                         });
                         ui.separator();
 
-                        let canvas_size = Vec2::new(320.0, 240.0);
-                        let (response, painter) = ui.allocate_painter(canvas_size, egui::Sense::hover());
-                        let rect = response.rect;
+                        match self.vista_derecha {
+                            VistaDerecha::Chasis => {
+                                let canvas_size = Vec2::new(320.0, 240.0);
+                                let (response, painter) = ui.allocate_painter(canvas_size, egui::Sense::hover());
+                                let rect = response.rect;
 
-                        if !self.vista_simulacion {
-                            // Fondo del canvas de chasis
-                            painter.rect_filled(rect, Rounding::same(6.0f32), Color32::from_rgb(22, 24, 34));
-                            painter.rect_stroke(
-                                rect,
-                                Rounding::same(6.0f32),
-                                Stroke::new(1.0f32, Color32::from_rgb(51, 65, 85)),
-                            );
-
-                            let center = rect.center();
-
-                            // Dibujar cuerpo central del Rover
-                            let body_rect = Rect::from_center_size(center, Vec2::new(56.0f32, 110.0f32));
-                            painter.rect_filled(
-                                body_rect,
-                                Rounding::same(4.0f32),
-                                Color32::from_rgb(33, 36, 51),
-                            );
-                            painter.rect_stroke(
-                                body_rect,
-                                Rounding::same(4.0f32),
-                                Stroke::new(1.5f32, Color32::from_rgb(0, 245, 212)),
-                            );
-
-                            // Linea longitudinal de simetria y diferencial mecanico
-                            painter.line_segment(
-                                [
-                                    Pos2::new(center.x, body_rect.top() + 6.0f32),
-                                    Pos2::new(center.x, body_rect.bottom() - 6.0f32),
-                                ],
-                                Stroke::new(1.0f32, Color32::from_rgb(71, 85, 105)),
-                            );
-
-                            // Coordenadas relativas de las 6 ruedas
-                            let dx = 58.0f32;
-                            let dy_front = 54.0f32;
-                            let dy_mid = 0.0f32;
-                            let dy_rear = 54.0f32;
-
-                            let pos_m1 = Pos2::new(center.x - dx, center.y - dy_front); // FL
-                            let pos_m2 = Pos2::new(center.x - dx, center.y - dy_mid);   // ML
-                            let pos_m3 = Pos2::new(center.x - dx, center.y + dy_rear);  // RL
-                            let pos_m4 = Pos2::new(center.x + dx, center.y - dy_front); // FR
-                            let pos_m5 = Pos2::new(center.x + dx, center.y - dy_mid);   // MR
-                            let pos_m6 = Pos2::new(center.x + dx, center.y + dy_rear);  // RR
-
-                            // Brazos de suspension Rocker-Bogie (enlaces mecanicos)
-                            let stroke_arm = Stroke::new(2.0f32, Color32::from_rgb(100, 116, 139));
-                            painter.line_segment([pos_m1, pos_m2], stroke_arm);
-                            painter.line_segment([pos_m2, pos_m3], stroke_arm);
-                            painter.line_segment([pos_m4, pos_m5], stroke_arm);
-                            painter.line_segment([pos_m5, pos_m6], stroke_arm);
-                            painter.line_segment([Pos2::new(center.x - 28.0f32, center.y), pos_m2], stroke_arm);
-                            painter.line_segment([Pos2::new(center.x + 28.0f32, center.y), pos_m5], stroke_arm);
-
-                            // Dibujar las 6 ruedas con orientacion y vectores
-                            let s = self.estado_chasis.servos;
-                            let pwms = self.estado_chasis.pwms_motores;
-
-                            Self::dibujar_rueda(&painter, pos_m1, s.s1, pwms[0], "M1");
-                            Self::dibujar_rueda(&painter, pos_m2, 90, pwms[1], "M2");
-                            Self::dibujar_rueda(&painter, pos_m3, s.s3, pwms[2], "M3");
-                            Self::dibujar_rueda(&painter, pos_m4, s.s2, pwms[3], "M4");
-                            Self::dibujar_rueda(&painter, pos_m5, 90, pwms[4], "M5");
-                            Self::dibujar_rueda(&painter, pos_m6, s.s4, pwms[5], "M6");
-                        } else {
-                            // Fondo del canvas de navegacion en plano
-                            painter.rect_filled(rect, Rounding::same(6.0f32), Color32::from_rgb(15, 17, 26));
-                            painter.rect_stroke(
-                                rect,
-                                Rounding::same(6.0f32),
-                                Stroke::new(1.0f32, Color32::from_rgb(51, 65, 85)),
-                            );
-
-                            let center = rect.center();
-                            let scale = 110.0f32; // 110 px por metro
-                            let pose = self.simulador.pose;
-
-                            // Cuadricula metrica en el plano del mundo (referencia fija)
-                            let half_w_m = (rect.width() / 2.0) / scale;
-                            let half_h_m = (rect.height() / 2.0) / scale;
-
-                            let min_x_m = ((pose.x - half_w_m) * 2.0).floor() / 2.0;
-                            let max_x_m = ((pose.x + half_w_m) * 2.0).ceil() / 2.0;
-                            let min_y_m = ((pose.y - half_h_m) * 2.0).floor() / 2.0;
-                            let max_y_m = ((pose.y + half_h_m) * 2.0).ceil() / 2.0;
-
-                            let mut xm = min_x_m;
-                            while xm <= max_x_m {
-                                let screen_x = center.x + (xm - pose.x) * scale;
-                                if screen_x >= rect.left() && screen_x <= rect.right() {
-                                    let stroke_color = if xm.abs() < 0.05 {
-                                        Color32::from_rgb(71, 85, 105)
-                                    } else {
-                                        Color32::from_rgb(26, 32, 48)
-                                    };
-                                    painter.line_segment(
-                                        [Pos2::new(screen_x, rect.top()), Pos2::new(screen_x, rect.bottom())],
-                                        Stroke::new(1.0f32, stroke_color),
-                                    );
-                                }
-                                xm += 0.5;
-                            }
-
-                            let mut ym = min_y_m;
-                            while ym <= max_y_m {
-                                let screen_y = center.y - (ym - pose.y) * scale;
-                                if screen_y >= rect.top() && screen_y <= rect.bottom() {
-                                    let stroke_color = if ym.abs() < 0.05 {
-                                        Color32::from_rgb(71, 85, 105)
-                                    } else {
-                                        Color32::from_rgb(26, 32, 48)
-                                    };
-                                    painter.line_segment(
-                                        [Pos2::new(rect.left(), screen_y), Pos2::new(rect.right(), screen_y)],
-                                        Stroke::new(1.0f32, stroke_color),
-                                    );
-                                }
-                                ym += 0.5;
-                            }
-
-                            // Marcador del origen (0, 0)
-                            let origen_x = center.x + (0.0 - pose.x) * scale;
-                            let origen_y = center.y - (0.0 - pose.y) * scale;
-                            if rect.contains(Pos2::new(origen_x, origen_y)) {
-                                painter.circle_filled(Pos2::new(origen_x, origen_y), 3.0, Color32::from_rgb(255, 159, 28));
-                                painter.text(
-                                    Pos2::new(origen_x + 6.0, origen_y - 6.0),
-                                    egui::Align2::LEFT_BOTTOM,
-                                    "(0,0)",
-                                    FontId::monospace(9.0),
-                                    Color32::from_rgb(148, 163, 184),
+                                // Fondo del canvas de chasis
+                                painter.rect_filled(rect, Rounding::same(6.0f32), Color32::from_rgb(22, 24, 34));
+                                painter.rect_stroke(
+                                    rect,
+                                    Rounding::same(6.0f32),
+                                    Stroke::new(1.0f32, Color32::from_rgb(51, 65, 85)),
                                 );
+
+                                let center = rect.center();
+
+                                // Dibujar cuerpo central del Rover
+                                let body_rect = Rect::from_center_size(center, Vec2::new(56.0f32, 110.0f32));
+                                painter.rect_filled(
+                                    body_rect,
+                                    Rounding::same(4.0f32),
+                                    Color32::from_rgb(33, 36, 51),
+                                );
+                                painter.rect_stroke(
+                                    body_rect,
+                                    Rounding::same(4.0f32),
+                                    Stroke::new(1.5f32, Color32::from_rgb(0, 245, 212)),
+                                );
+
+                                // Linea longitudinal de simetria y diferencial mecanico
+                                painter.line_segment(
+                                    [
+                                        Pos2::new(center.x, body_rect.top() + 6.0f32),
+                                        Pos2::new(center.x, body_rect.bottom() - 6.0f32),
+                                    ],
+                                    Stroke::new(1.0f32, Color32::from_rgb(71, 85, 105)),
+                                );
+
+                                // Coordenadas relativas de las 6 ruedas
+                                let dx = 58.0f32;
+                                let dy_front = 54.0f32;
+                                let dy_mid = 0.0f32;
+                                let dy_rear = 54.0f32;
+
+                                let pos_m1 = Pos2::new(center.x - dx, center.y - dy_front); // FL
+                                let pos_m2 = Pos2::new(center.x - dx, center.y - dy_mid);   // ML
+                                let pos_m3 = Pos2::new(center.x - dx, center.y + dy_rear);  // RL
+                                let pos_m4 = Pos2::new(center.x + dx, center.y - dy_front); // FR
+                                let pos_m5 = Pos2::new(center.x + dx, center.y - dy_mid);   // MR
+                                let pos_m6 = Pos2::new(center.x + dx, center.y + dy_rear);  // RR
+
+                                // Brazos de suspension Rocker-Bogie (enlaces mecanicos)
+                                let stroke_arm = Stroke::new(2.0f32, Color32::from_rgb(100, 116, 139));
+                                painter.line_segment([pos_m1, pos_m2], stroke_arm);
+                                painter.line_segment([pos_m2, pos_m3], stroke_arm);
+                                painter.line_segment([pos_m4, pos_m5], stroke_arm);
+                                painter.line_segment([pos_m5, pos_m6], stroke_arm);
+                                painter.line_segment([Pos2::new(center.x - 28.0f32, center.y), pos_m2], stroke_arm);
+                                painter.line_segment([Pos2::new(center.x + 28.0f32, center.y), pos_m5], stroke_arm);
+
+                                // Dibujar las 6 ruedas con orientacion y vectores
+                                let s = self.estado_chasis.servos;
+                                let pwms = self.estado_chasis.pwms_motores;
+
+                                Self::dibujar_rueda(&painter, pos_m1, s.s1, pwms[0], "M1");
+                                Self::dibujar_rueda(&painter, pos_m2, 90, pwms[1], "M2");
+                                Self::dibujar_rueda(&painter, pos_m3, s.s3, pwms[2], "M3");
+                                Self::dibujar_rueda(&painter, pos_m4, s.s2, pwms[3], "M4");
+                                Self::dibujar_rueda(&painter, pos_m5, 90, pwms[4], "M5");
+                                Self::dibujar_rueda(&painter, pos_m6, s.s4, pwms[5], "M6");
                             }
+                            VistaDerecha::Simulador => {
+                                let canvas_size = Vec2::new(320.0, 240.0);
+                                let (response, painter) = ui.allocate_painter(canvas_size, egui::Sense::hover());
+                                let rect = response.rect;
 
-                            // Traza historica de trayectoria recorrida
-                            let puntos_trayectoria: Vec<Pos2> = self.simulador.trayectoria
-                                .iter()
-                                .map(|p| Pos2::new(center.x + (p.x - pose.x) * scale, center.y - (p.y - pose.y) * scale))
-                                .collect();
+                                // Fondo del canvas de navegacion en plano
+                                painter.rect_filled(rect, Rounding::same(6.0f32), Color32::from_rgb(15, 17, 26));
+                                painter.rect_stroke(
+                                    rect,
+                                    Rounding::same(6.0f32),
+                                    Stroke::new(1.0f32, Color32::from_rgb(51, 65, 85)),
+                                );
 
-                            if puntos_trayectoria.len() >= 2 {
-                                for pair in puntos_trayectoria.windows(2) {
-                                    if rect.contains(pair[0]) || rect.contains(pair[1]) {
-                                        painter.line_segment([pair[0], pair[1]], Stroke::new(1.5f32, Color32::from_rgb(0, 245, 212)));
+                                let center = rect.center();
+                                let scale = 110.0f32; // 110 px por metro
+                                let pose = self.simulador.pose;
+
+                                // Cuadricula metrica en el plano del mundo (referencia fija)
+                                let half_w_m = (rect.width() / 2.0) / scale;
+                                let half_h_m = (rect.height() / 2.0) / scale;
+
+                                let min_x_m = ((pose.x - half_w_m) * 2.0).floor() / 2.0;
+                                let max_x_m = ((pose.x + half_w_m) * 2.0).ceil() / 2.0;
+                                let min_y_m = ((pose.y - half_h_m) * 2.0).floor() / 2.0;
+                                let max_y_m = ((pose.y + half_h_m) * 2.0).ceil() / 2.0;
+
+                                let mut xm = min_x_m;
+                                while xm <= max_x_m {
+                                    let screen_x = center.x + (xm - pose.x) * scale;
+                                    if screen_x >= rect.left() && screen_x <= rect.right() {
+                                        let stroke_color = if xm.abs() < 0.05 {
+                                            Color32::from_rgb(71, 85, 105)
+                                        } else {
+                                            Color32::from_rgb(26, 32, 48)
+                                        };
+                                        painter.line_segment(
+                                            [Pos2::new(screen_x, rect.top()), Pos2::new(screen_x, rect.bottom())],
+                                            Stroke::new(1.0f32, stroke_color),
+                                        );
+                                    }
+                                    xm += 0.5;
+                                }
+
+                                let mut ym = min_y_m;
+                                while ym <= max_y_m {
+                                    let screen_y = center.y - (ym - pose.y) * scale;
+                                    if screen_y >= rect.top() && screen_y <= rect.bottom() {
+                                        let stroke_color = if ym.abs() < 0.05 {
+                                            Color32::from_rgb(71, 85, 105)
+                                        } else {
+                                            Color32::from_rgb(26, 32, 48)
+                                        };
+                                        painter.line_segment(
+                                            [Pos2::new(rect.left(), screen_y), Pos2::new(rect.right(), screen_y)],
+                                            Stroke::new(1.0f32, stroke_color),
+                                        );
+                                    }
+                                    ym += 0.5;
+                                }
+
+                                // Marcador del origen (0, 0)
+                                let origen_x = center.x + (0.0 - pose.x) * scale;
+                                let origen_y = center.y - (0.0 - pose.y) * scale;
+                                if rect.contains(Pos2::new(origen_x, origen_y)) {
+                                    painter.circle_filled(Pos2::new(origen_x, origen_y), 3.0, Color32::from_rgb(255, 159, 28));
+                                    painter.text(
+                                        Pos2::new(origen_x + 6.0, origen_y - 6.0),
+                                        egui::Align2::LEFT_BOTTOM,
+                                        "(0,0)",
+                                        FontId::monospace(9.0),
+                                        Color32::from_rgb(148, 163, 184),
+                                    );
+                                }
+
+                                // Traza historica de trayectoria recorrida
+                                let puntos_trayectoria: Vec<Pos2> = self.simulador.trayectoria
+                                    .iter()
+                                    .map(|p| Pos2::new(center.x + (p.x - pose.x) * scale, center.y - (p.y - pose.y) * scale))
+                                    .collect();
+
+                                if puntos_trayectoria.len() >= 2 {
+                                    for pair in puntos_trayectoria.windows(2) {
+                                        if rect.contains(pair[0]) || rect.contains(pair[1]) {
+                                            painter.line_segment([pair[0], pair[1]], Stroke::new(1.5f32, Color32::from_rgb(0, 245, 212)));
+                                        }
                                     }
                                 }
+
+                                // Renderizado del vehiculo en el simulador
+                                Self::dibujar_rover_en_simulador(
+                                    &painter,
+                                    center,
+                                    pose.theta_rad,
+                                    scale,
+                                    &self.simulador.parametros,
+                                    &self.estado_chasis,
+                                );
+
+                                // HUD de telemetria en tiempo real
+                                let hud_pos = Pos2::new(rect.left() + 8.0, rect.top() + 8.0);
+                                let r_hud = if pose.radio_giro.is_infinite() {
+                                    "INF".to_string()
+                                } else {
+                                    format!("{:.2}m", pose.radio_giro)
+                                };
+                                let hud_text = format!(
+                                    "X: {:+.2}m  Y: {:+.2}m  Yaw: {:+.1} deg\nVel: {:.2}m/s  w: {:+.2}rad/s  R_icr: {}\nDist: {:.2}m",
+                                    pose.x, pose.y, pose.theta_rad.to_degrees(),
+                                    pose.vel_lineal, pose.omega_rad_s, r_hud, self.simulador.distancia_acumulada_m
+                                );
+                                painter.text(
+                                    hud_pos,
+                                    egui::Align2::LEFT_TOP,
+                                    hud_text,
+                                    FontId::monospace(9.5),
+                                    Color32::from_rgb(226, 232, 240),
+                                );
+
+                                // Controles del simulador
+                                ui.add_space(4.0);
+                                ui.horizontal(|ui| {
+                                    if ui.button("[Reiniciar Pose (0,0)]").clicked() {
+                                        self.simulador.reiniciar();
+                                    }
+                                    if ui.button("[Limpiar Traza]").clicked() {
+                                        self.simulador.limpiar_trayectoria();
+                                    }
+                                    ui.separator();
+                                    ui.label(
+                                        egui::RichText::new(format!(
+                                            "Mando: S1(X:{:+.1}, Y:{:+.1}) Pot:{:.0}%",
+                                            self.joystick.stick1_x, self.joystick.stick1_y, self.joystick.pot_master * 100.0
+                                        ))
+                                        .font(FontId::monospace(9.0))
+                                        .color(Color32::from_rgb(148, 163, 184)),
+                                    );
+                                });
                             }
+                            VistaDerecha::JoystickDebug => {
+                                ui.vertical(|ui| {
+                                    // Fila de Sticks interactivos (arrastrables con el raton o sincronizados con teclado)
+                                    let mut arrastre_stick = false;
+                                    ui.horizontal(|ui| {
+                                        ui.columns(2, |subcols| {
+                                            // Stick 1: Traccion y Direccion
+                                            subcols[0].vertical_centered(|ui| {
+                                                arrastre_stick |= JoystickEstado::dibujar_widget_stick(
+                                                    ui,
+                                                    46.0,
+                                                    &mut self.joystick.stick1_x,
+                                                    &mut self.joystick.stick1_y,
+                                                    "Stick 1: Direccion / Traccion",
+                                                    Color32::from_rgb(0, 245, 212),
+                                                );
+                                            });
 
-                            // Renderizado del vehiculo en el simulador
-                            Self::dibujar_rover_en_simulador(
-                                &painter,
-                                center,
-                                pose.theta_rad,
-                                scale,
-                                &self.simulador.parametros,
-                                &self.estado_chasis,
-                            );
+                                            // Stick 2: Point Turn / Auxiliar
+                                            subcols[1].vertical_centered(|ui| {
+                                                arrastre_stick |= JoystickEstado::dibujar_widget_stick(
+                                                    ui,
+                                                    46.0,
+                                                    &mut self.joystick.stick2_x,
+                                                    &mut self.joystick.stick2_y,
+                                                    "Stick 2: Giro Eje / LiDAR",
+                                                    Color32::from_rgb(255, 159, 28),
+                                                );
+                                            });
+                                        });
+                                    });
 
-                            // HUD de telemetria en tiempo real
-                            let hud_pos = Pos2::new(rect.left() + 8.0, rect.top() + 8.0);
-                            let r_hud = if pose.radio_giro.is_infinite() {
-                                "INF".to_string()
-                            } else {
-                                format!("{:.2}m", pose.radio_giro)
-                            };
-                            let hud_text = format!(
-                                "X: {:+.2}m  Y: {:+.2}m  Yaw: {:+.1} deg\nVel: {:.2}m/s  w: {:+.2}rad/s  R_icr: {}\nDist: {:.2}m",
-                                pose.x, pose.y, pose.theta_rad.to_degrees(),
-                                pose.vel_lineal, pose.omega_rad_s, r_hud, self.simulador.distancia_acumulada_m
-                            );
-                            painter.text(
-                                hud_pos,
-                                egui::Align2::LEFT_TOP,
-                                hud_text,
-                                FontId::monospace(9.5),
-                                Color32::from_rgb(226, 232, 240),
-                            );
+                                    // Si el usuario movio los sticks virtuales con el raton, mapear a consignas
+                                    if arrastre_stick {
+                                        let s1_x = self.joystick.stick1_x;
+                                        let s1_y = self.joystick.stick1_y;
+                                        let s2_x = self.joystick.stick2_x;
 
-                            // Controles del simulador
-                            ui.add_space(4.0);
-                            ui.horizontal(|ui| {
-                                if ui.button("[Reiniciar Pose (0,0)]").clicked() {
-                                    self.simulador.reiniciar();
-                                }
-                                if ui.button("[Limpiar Traza]").clicked() {
-                                    self.simulador.limpiar_trayectoria();
-                                }
-                            });
+                                        self.teclas.w = s1_y > 0.2;
+                                        self.teclas.s = s1_y < -0.2;
+                                        self.teclas.d = s1_x > 0.2;
+                                        self.teclas.a = s1_x < -0.2;
+                                        self.teclas.e = s2_x > 0.2;
+                                        self.teclas.q = s2_x < -0.2;
+
+                                        self.estado_chasis = calcular_cinematica(
+                                            &self.teclas,
+                                            self.modo,
+                                            &self.trims,
+                                            &self.servos_manuales,
+                                            self.invertir_servos,
+                                            self.servos_360,
+                                        );
+                                        if self.teclas.hay_movimiento() && self.modo != ModoConduccion::Manual {
+                                            self.servos_manuales = self.estado_chasis.servos;
+                                        }
+                                    }
+
+                                    ui.add_space(4.0);
+
+                                    // Controles de botones, sliders y macros
+                                    ui.horizontal(|ui| {
+                                        ui.add(
+                                            egui::Slider::new(&mut self.joystick.pot_master, 0.0..=1.0)
+                                                .text("Potencia Master")
+                                                .show_value(true),
+                                        );
+                                        if ui.button("[E-STOP]").clicked() {
+                                            self.parada_emergencia();
+                                        }
+                                        if ui.button("[Centrar Sticks]").clicked() {
+                                            self.joystick.stick1_x = 0.0;
+                                            self.joystick.stick1_y = 0.0;
+                                            self.joystick.stick2_x = 0.0;
+                                            self.joystick.stick2_y = 0.0;
+                                            self.teclas = TeclasEstado::default();
+                                            self.estado_chasis = calcular_cinematica(
+                                                &self.teclas,
+                                                self.modo,
+                                                &self.trims,
+                                                &self.servos_manuales,
+                                                self.invertir_servos,
+                                                self.servos_360,
+                                            );
+                                        }
+                                    });
+
+                                    ui.horizontal_wrapped(|ui| {
+                                        if ui.button("[Macro Pivot Izq (Q)]").clicked() {
+                                            self.joystick.stick2_x = -1.0;
+                                            self.teclas.q = true;
+                                            self.teclas.e = false;
+                                            self.estado_chasis = calcular_cinematica(
+                                                &self.teclas,
+                                                self.modo,
+                                                &self.trims,
+                                                &self.servos_manuales,
+                                                self.invertir_servos,
+                                                self.servos_360,
+                                            );
+                                        }
+                                        if ui.button("[Macro Pivot Der (E)]").clicked() {
+                                            self.joystick.stick2_x = 1.0;
+                                            self.teclas.e = true;
+                                            self.teclas.q = false;
+                                            self.estado_chasis = calcular_cinematica(
+                                                &self.teclas,
+                                                self.modo,
+                                                &self.trims,
+                                                &self.servos_manuales,
+                                                self.invertir_servos,
+                                                self.servos_360,
+                                            );
+                                        }
+                                        if ui.checkbox(&mut self.joystick.sw_stick1, "SW Cangrejo").changed() {
+                                            if self.joystick.sw_stick1 {
+                                                self.modo = ModoConduccion::Crab;
+                                            } else {
+                                                self.modo = ModoConduccion::Ackermann;
+                                            }
+                                        }
+                                    });
+
+                                    ui.separator();
+
+                                    // CASILLA DE DECODIFICACION Y DIAGNOSTICO: "QUE SE RECIBE Y QUE DEBERIA HACER"
+                                    let accion_desc = JoystickEstado::interpretar_accion(
+                                        &self.estado_chasis,
+                                        self.simulador.pose.radio_giro,
+                                        self.simulador.pose.vel_lineal,
+                                    );
+
+                                    egui::Frame::canvas(ui.style())
+                                        .fill(Color32::from_rgb(18, 21, 31))
+                                        .rounding(Rounding::same(4.0))
+                                        .stroke(Stroke::new(1.0f32, Color32::from_rgb(45, 55, 72)))
+                                        .show(ui, |ui| {
+                                            ui.vertical(|ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        egui::RichText::new("[ESTADO DECODIFICADO DEL MANDO]")
+                                                            .font(FontId::monospace(9.5))
+                                                            .strong()
+                                                            .color(Color32::from_rgb(0, 245, 212)),
+                                                    );
+                                                    let estop_txt = if self.joystick.btn_estop { "[ESTOP ACTIVO]" } else { "[ESTOP OK]" };
+                                                    let estop_col = if self.joystick.btn_estop { Color32::from_rgb(248, 113, 113) } else { Color32::from_rgb(56, 176, 0) };
+                                                    ui.label(
+                                                        egui::RichText::new(estop_txt)
+                                                            .font(FontId::monospace(9.0))
+                                                            .color(estop_col),
+                                                    );
+                                                });
+
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "RECIBIDO: S1(X:{:+.2}, Y:{:+.2}) | S2(X:{:+.2}, Y:{:+.2}) | Pot: {:.0}%",
+                                                        self.joystick.stick1_x, self.joystick.stick1_y,
+                                                        self.joystick.stick2_x, self.joystick.stick2_y,
+                                                        self.joystick.pot_master * 100.0
+                                                    ))
+                                                    .font(FontId::monospace(9.0))
+                                                    .color(Color32::from_rgb(203, 213, 225)),
+                                                );
+
+                                                ui.label(
+                                                    egui::RichText::new(format!("ACCION ROVER: {}", accion_desc))
+                                                        .font(FontId::monospace(9.0))
+                                                        .color(Color32::from_rgb(255, 209, 102)),
+                                                );
+
+                                                let s = self.estado_chasis.servos;
+                                                let pkt = generar_paquete_rover(&self.estado_chasis);
+                                                let bytes = pkt.to_bytes();
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "CONSIGNAS: Trac: ({:+}/{:+}) | Servos: [S1:{} deg, S2:{} deg, S3:{} deg, S4:{} deg]",
+                                                        self.estado_chasis.traccion_izq, self.estado_chasis.traccion_der,
+                                                        s.s1, s.s2, s.s3, s.s4
+                                                    ))
+                                                    .font(FontId::monospace(9.0))
+                                                    .color(Color32::from_rgb(148, 163, 184)),
+                                                );
+
+                                                ui.label(
+                                                    egui::RichText::new(format!(
+                                                        "TRAMA RF (6B HEX): [0x{:02X}, 0x{:02X}, 0x{:02X}, 0x{:02X}, 0x{:02X}, 0x{:02X}]",
+                                                        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]
+                                                    ))
+                                                    .font(FontId::monospace(9.0))
+                                                    .color(Color32::from_rgb(56, 176, 0)),
+                                                );
+                                            });
+                                        });
+                                });
+                            }
                         }
                     });
 
