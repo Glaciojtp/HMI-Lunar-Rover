@@ -521,6 +521,26 @@ fn test_geometria_orientacion_colineal_vector_y_rueda() {
     }
 }
 
+#[test]
+fn test_parsear_telemetria_rx() {
+    let raw = "RX -> Izq: 150 | Der: -120 | S1: 120 | S2: 60 | S3: 110 | S4: 70";
+    let parsed = hmi_gui::app::parsear_telemetria_rx_str(raw).expect("Telemetria valida");
+    assert_eq!(parsed.traccion_izq, 150);
+    assert_eq!(parsed.traccion_der, -120);
+    assert_eq!(parsed.angulo_s1, 120);
+    assert_eq!(parsed.angulo_s2, 60);
+    assert_eq!(parsed.angulo_s3, 110);
+    assert_eq!(parsed.angulo_s4, 70);
+
+    // Test con clamping mecanico [10, 170]
+    let raw_out_of_bounds = "RX -> Izq: 0 | Der: 0 | S1: 5 | S2: 180 | S3: 90 | S4: 90";
+    let parsed_oob = hmi_gui::app::parsear_telemetria_rx_str(raw_out_of_bounds).expect("Telemetria valida");
+    assert_eq!(parsed_oob.angulo_s1, 10);
+    assert_eq!(parsed_oob.angulo_s2, 170);
+    assert_eq!(parsed_oob.angulo_s3, 90);
+    assert_eq!(parsed_oob.angulo_s4, 90);
+}
+
 // =========================================================================
 // 5. AUDITORIA ESTRICTA DE ERRADICACION TOTAL DE EMOJIS
 // =========================================================================

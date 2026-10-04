@@ -52,11 +52,16 @@ impl Default for SerialWorkerHandle {
 impl SerialWorkerHandle {
     /// Inicia el trabajador serial en un hilo secundario independiente.
     pub fn start() -> Self {
+        Self::start_with_name("rover-serial-worker")
+    }
+
+    /// Inicia el trabajador serial en un hilo secundario independiente con un nombre personalizado.
+    pub fn start_with_name(name: impl Into<String>) -> Self {
         let (tx_cmd, rx_cmd) = channel::<SerialCommand>();
         let (tx_event, rx_event) = channel::<SerialEvent>();
 
         let thread_handle = thread::Builder::new()
-            .name("rover-serial-worker".to_string())
+            .name(name.into())
             .spawn(move || {
                 run_worker_loop(rx_cmd, tx_event);
             })

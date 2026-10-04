@@ -25,7 +25,49 @@ use crate::serial_worker::{SerialEvent, SerialWorkerHandle};
 use crate::joystick::JoystickEstado;
 use crate::simulation::SimuladorPlano;
 
-/// Seleccion de la vista principal del panel derecho.
+/// Seleccion de la vista de navegacion principal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VistaPrincipal {
+    Control,
+    Debug,
+}
+
+/// Filtro para las entradas del log en el monitor serial.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FiltroLog {
+    Todos,
+    Tx,
+    Rx,
+    Mcu,
+    Err,
+    Sys,
+}
+
+/// Telemetria recibida desde el receptor a bordo del Rover.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TelemetriaRoverRx {
+    pub traccion_izq: i16,
+    pub traccion_der: i16,
+    pub angulo_s1: u8,
+    pub angulo_s2: u8,
+    pub angulo_s3: u8,
+    pub angulo_s4: u8,
+}
+
+impl Default for TelemetriaRoverRx {
+    fn default() -> Self {
+        Self {
+            traccion_izq: 0,
+            traccion_der: 0,
+            angulo_s1: 90,
+            angulo_s2: 90,
+            angulo_s3: 90,
+            angulo_s4: 90,
+        }
+    }
+}
+
+/// Seleccion de la vista principal del panel derecho en modo control.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VistaDerecha {
     Chasis,
@@ -53,7 +95,11 @@ pub struct EstadisticasApp {
 
 /// Estructura principal de la aplicacion eframe / egui.
 pub struct RoverApp {
-    // Comunicacion serial y hardware
+    // Modo de navegacion y vista
+    pub vista_principal: VistaPrincipal,
+    pub filtro_log: FiltroLog,
+
+    // Comunicacion serial Transmisor (TX)
     registro_perfiles: HardwareProfileRegistry,
     serial_worker: SerialWorkerHandle,
     puertos_disponibles: Vec<DiscoveredPort>,
@@ -63,6 +109,16 @@ pub struct RoverApp {
     conectado: bool,
     puerto_conectado: Option<String>,
     handshake: Option<HandshakeInfo>,
+
+    // Comunicacion serial Receptor (RX Monitor)
+    pub serial_rx_worker: SerialWorkerHandle,
+    pub puerto_rx_seleccionado: String,
+    pub baudrate_rx_seleccionado: u32,
+    pub conectado_rx: bool,
+    pub puerto_rx_conectado: Option<String>,
+    pub handshake_rx: Option<HandshakeInfo>,
+    pub telemetria_rx: Option<TelemetriaRoverRx>,
+    pub texto_comando_rx: String,
 
     // Control y cinematica
     modo: ModoConduccion,
@@ -96,9 +152,13 @@ impl Default for RoverApp {
     fn default() -> Self {
         let registry = HardwareProfileRegistry::new();
         let default_profile_id = PERFIL_DEFAULT_ID.to_string();
-        let serial_worker = SerialWorkerHandle::start();
+        let serial_worker = SerialWorkerHandle::start_with_name("rover-tx-worker");
+        let serial_rx_worker = SerialWorkerHandle::start_with_name("rover-rx-worker");
 
         let mut app = Self {
+            vista_principal: VistaPrincipal::Control,
+            filtro_log: FiltroLog::Todos,
+
             registro_perfiles: registry,
             serial_worker,
             puertos_disponibles: Vec::new(),
@@ -108,6 +168,15 @@ impl Default for RoverApp {
             conectado: false,
             puerto_conectado: None,
             handshake: None,
+
+            serial_rx_worker,
+            puerto_rx_seleccionado: String::new(),
+            baudrate_rx_seleccionado: 115200,
+            conectado_rx: false,
+            puerto_rx_conectado: None,
+            handshake_rx: None,
+            telemetria_rx: None,
+            texto_comando_rx: String::new(),
 
             modo: ModoConduccion::Ackermann,
             teclas: TeclasEstado::default(),
@@ -195,6 +264,12 @@ impl RoverApp {
             }
         }
 
+        if self.puerto_rx_seleccionado.is_empty() && self.puertos_disponibles.len() > 1 {
+            self.puerto_rx_seleccionado = self.puertos_disponibles[1].port_name.clone();
+        } else if self.puerto_rx_seleccionado.is_empty() && !self.puertos_disponibles.is_empty() {
+            self.puerto_rx_seleccionado = self.puertos_disponibles[0].port_name.clone();
+        }
+
         self.agregar_log(
             "[SYS]",
             format!("Puertos detectados: {}", self.puertos_disponibles.len()),
@@ -202,7 +277,7 @@ impl RoverApp {
         );
     }
 
-    /// Conmuta la conexion serial con el puerto y baudrate actualmente seleccionados.
+    /// Conmuta la conexion serial con el puerto transmisor TX.
     pub fn toggle_conexion(&mut self) {
         if self.conectado {
             self.serial_worker.disconnect();
@@ -213,7 +288,7 @@ impl RoverApp {
             if self.puerto_seleccionado.is_empty() {
                 self.agregar_log(
                     "[ERR]",
-                    "No hay ningun puerto COM seleccionado",
+                    "No hay ningun puerto COM seleccionado para TX",
                     Color32::from_rgb(248, 113, 113),
                 );
                 return;
@@ -221,13 +296,47 @@ impl RoverApp {
             self.agregar_log(
                 "[SYS]",
                 format!(
-                    "Conectando a {} a {} baudios...",
+                    "Conectando TX a {} a {} baudios...",
                     self.puerto_seleccionado, self.baudrate_seleccionado
                 ),
                 Color32::from_rgb(255, 159, 28),
             );
             self.serial_worker
                 .connect(&self.puerto_seleccionado, self.baudrate_seleccionado);
+        }
+    }
+
+    /// Conmuta la conexion serial con el puerto receptor RX.
+    pub fn toggle_conexion_rx(&mut self) {
+        if self.conectado_rx {
+            self.serial_rx_worker.disconnect();
+            self.conectado_rx = false;
+            self.puerto_rx_conectado = None;
+            self.handshake_rx = None;
+            self.agregar_log(
+                "[RX_PORT]",
+                "Puerto de receptor RX desconectado y liberado",
+                Color32::from_rgb(248, 113, 113),
+            );
+        } else {
+            if self.puerto_rx_seleccionado.is_empty() {
+                self.agregar_log(
+                    "[RX_ERR]",
+                    "No hay ningun puerto COM seleccionado para RX",
+                    Color32::from_rgb(248, 113, 113),
+                );
+                return;
+            }
+            self.agregar_log(
+                "[RX_SYS]",
+                format!(
+                    "Conectando receptor RX a {} a {} baudios...",
+                    self.puerto_rx_seleccionado, self.baudrate_rx_seleccionado
+                ),
+                Color32::from_rgb(255, 159, 28),
+            );
+            self.serial_rx_worker
+                .connect(&self.puerto_rx_seleccionado, self.baudrate_rx_seleccionado);
         }
     }
 
@@ -352,6 +461,75 @@ impl RoverApp {
         }
     }
 
+    /// Procesa eventos asincronos recibidos desde el hilo del trabajador serial del receptor RX.
+    fn procesar_eventos_serial_rx(&mut self) {
+        while let Some(evento) = self.serial_rx_worker.try_recv_event() {
+            match evento {
+                SerialEvent::Connected { port, baud_rate } => {
+                    self.conectado_rx = true;
+                    self.puerto_rx_conectado = Some(port.clone());
+                    self.agregar_log(
+                        "[RX_PORT]",
+                        format!("Enlace con Receptor activo en {} a {} baudios", port, baud_rate),
+                        Color32::from_rgb(0, 245, 212),
+                    );
+                    self.serial_rx_worker.send_raw("IDENT\n");
+                }
+                SerialEvent::Disconnected => {
+                    self.conectado_rx = false;
+                    self.puerto_rx_conectado = None;
+                    self.handshake_rx = None;
+                    self.agregar_log(
+                        "[RX_PORT]",
+                        "Puerto receptor desconectado y liberado",
+                        Color32::from_rgb(248, 113, 113),
+                    );
+                }
+                SerialEvent::LineReceived(linea) => {
+                    self.estadisticas.lineas_rx += 1;
+                    if linea.starts_with("ID:") {
+                        match self.registro_perfiles.resolve_handshake(&linea) {
+                            Ok((perfil, info)) => {
+                                self.agregar_log(
+                                    "[IDENT_RX]",
+                                    format!(
+                                        "Receptor: {} | Rol: {} | Version: {} (Perfil: {})",
+                                        info.placa, info.rol, info.version, perfil.nombre
+                                    ),
+                                    Color32::from_rgb(56, 176, 0),
+                                );
+                                self.handshake_rx = Some(info);
+                            }
+                            Err(e) => {
+                                self.agregar_log(
+                                    "[RX_ERR]",
+                                    format!("{} (Error handshake: {})", linea, e),
+                                    Color32::from_rgb(248, 113, 113),
+                                );
+                            }
+                        }
+                    } else if linea.starts_with("RX ->") {
+                        if let Some(telem) = parsear_telemetria_rx_str(&linea) {
+                            self.telemetria_rx = Some(telem);
+                        }
+                        self.agregar_log("[RX_MCU]", linea, Color32::from_rgb(147, 197, 253));
+                    } else if linea.starts_with("SYS:") {
+                        self.agregar_log("[RX_SYS]", linea, Color32::from_rgb(251, 191, 36));
+                    } else {
+                        self.agregar_log("[RX]", linea, Color32::from_rgb(203, 213, 225));
+                    }
+                }
+                SerialEvent::Error(err) => {
+                    self.agregar_log("[RX_ERR]", err, Color32::from_rgb(239, 68, 68));
+                }
+                SerialEvent::Info(info) => {
+                    self.agregar_log("[RX_SYS]", info, Color32::from_rgb(148, 163, 184));
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Captura y mapea las pulsaciones de teclado para pilotaje.
     fn procesar_teclado(&mut self, ctx: &egui::Context) {
         if ctx.wants_keyboard_input() {
@@ -422,6 +600,7 @@ impl RoverApp {
 impl eframe::App for RoverApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.procesar_eventos_serial();
+        self.procesar_eventos_serial_rx();
         self.procesar_teclado(ctx);
         self.procesar_transmision_periodica();
         self.simulador.tick(&self.estado_chasis, None);
@@ -443,6 +622,17 @@ impl eframe::App for RoverApp {
 
                 ui.separator();
 
+                let es_control = self.vista_principal == VistaPrincipal::Control;
+                if ui.selectable_label(es_control, "[MODO CONTROL 6x6]").clicked() {
+                    self.vista_principal = VistaPrincipal::Control;
+                }
+                let es_debug = self.vista_principal == VistaPrincipal::Debug;
+                if ui.selectable_label(es_debug, "[MODO DEPURACION Y VERSIONES]").clicked() {
+                    self.vista_principal = VistaPrincipal::Debug;
+                }
+
+                ui.separator();
+
                 // Insignia de perfil de hardware
                 let perfil_nombre = self
                     .registro_perfiles
@@ -455,19 +645,33 @@ impl eframe::App for RoverApp {
                 );
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if self.conectado_rx {
+                        let p = self.puerto_rx_conectado.as_deref().unwrap_or("COM");
+                        ui.label(
+                            egui::RichText::new(format!("[RX: EN LINEA ({})]", p))
+                                .strong()
+                                .color(Color32::from_rgb(0, 245, 212)),
+                        );
+                    } else {
+                        ui.label(
+                            egui::RichText::new("[RX: OFF]")
+                                .color(Color32::from_rgb(148, 163, 184)),
+                        );
+                    }
+
                     if self.conectado {
                         let puerto_str = self
                             .puerto_conectado
                             .as_deref()
                             .unwrap_or("COM");
                         ui.label(
-                            egui::RichText::new(format!("[CONECTADO ({})]", puerto_str))
+                            egui::RichText::new(format!("[TX: CONECTADO ({})]", puerto_str))
                                 .strong()
                                 .color(Color32::from_rgb(56, 176, 0)),
                         );
                     } else {
                         ui.label(
-                            egui::RichText::new("[DESCONECTADO]")
+                            egui::RichText::new("[TX: OFF]")
                                 .strong()
                                 .color(Color32::from_rgb(248, 113, 113)),
                         );
@@ -486,7 +690,7 @@ impl eframe::App for RoverApp {
 
             // Controles de seleccion de puerto, conexion y handshake
             ui.horizontal(|ui| {
-                ui.label("Puerto:");
+                ui.label("Puerto TX:");
 
                 egui::ComboBox::from_id_source("cb_puerto")
                     .selected_text(if self.puerto_seleccionado.is_empty() {
@@ -521,15 +725,15 @@ impl eframe::App for RoverApp {
                     });
 
                 let btn_conectar_texto = if self.conectado {
-                    "[DESCONECTAR]"
+                    "[DESCONECTAR TX]"
                 } else {
-                    "[CONECTAR]"
+                    "[CONECTAR TX]"
                 };
                 if ui.button(btn_conectar_texto).clicked() {
                     self.toggle_conexion();
                 }
 
-                if ui.button("[IDENT]").clicked() {
+                if ui.button("[IDENT TX]").clicked() {
                     self.serial_worker.send_raw("IDENT\n");
                     self.agregar_log(
                         "[TX]",
@@ -538,7 +742,7 @@ impl eframe::App for RoverApp {
                     );
                 }
 
-                if ui.button("[PING]").clicked() {
+                if ui.button("[PING TX]").clicked() {
                     self.serial_worker.send_raw("PING\n");
                     self.agregar_log(
                         "[TX]",
@@ -592,9 +796,24 @@ impl eframe::App for RoverApp {
         });
 
         // =====================================================================
-        // 2. PANEL CENTRAL: COLUMNAS DE CONTROL, 2D CANVAS Y TELEMETRIA
+        // 2. PANEL CENTRAL: MODO CONTROL O MODO DEPURACION
         // =====================================================================
         egui::CentralPanel::default().show(ctx, |ui| {
+            match self.vista_principal {
+                VistaPrincipal::Control => {
+                    self.dibujar_vista_control(ui);
+                }
+                VistaPrincipal::Debug => {
+                    self.dibujar_vista_debug(ui);
+                }
+            }
+        });
+    }
+}
+
+impl RoverApp {
+    /// Renderiza la vista principal de control 6x6, cinematica y simulador 2D.
+    fn dibujar_vista_control(&mut self, ui: &mut egui::Ui) {
             ui.columns(2, |columns| {
                 // -------------------------------------------------------------
                 // COLUMNA IZQUIERDA: TRIMS Y SERVOS
@@ -1337,7 +1556,7 @@ impl eframe::App for RoverApp {
                                     .hint_text("Ej: IDENT, PING, STOP, CMD,150,150,90,90"),
                             );
 
-                            let enter_presionado = response.lost_focus() && ctx.input(|i| i.key_pressed(Key::Enter));
+                            let enter_presionado = response.lost_focus() && ui.ctx().input(|i| i.key_pressed(Key::Enter));
                             if (ui.button("[Enviar]").clicked() || enter_presionado)
                                 && !self.texto_comando_personalizado.trim().is_empty()
                             {
@@ -1354,11 +1573,364 @@ impl eframe::App for RoverApp {
                     });
                 });
             });
+    }
+
+    /// Renderiza la vista avanzada de depuracion, monitor dual TX/RX y sistema de versiones.
+    fn dibujar_vista_debug(&mut self, ui: &mut egui::Ui) {
+        ui.columns(2, |columns| {
+            // =========================================================
+            // COLUMNA IZQUIERDA: DUAL PORTS (TX & RX) Y VERSIONES DE HARDWARE
+            // =========================================================
+            columns[0].vertical(|ui| {
+                // 1. TARJETA TRANSMISOR USB-RF (TX)
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("TRANSMISOR USB-RF (TX - ESTACION TERRENA)")
+                                .strong()
+                                .color(Color32::from_rgb(0, 245, 212)),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if self.conectado {
+                                let p = self.puerto_conectado.as_deref().unwrap_or("COM");
+                                ui.label(
+                                    egui::RichText::new(format!("[TX EN LINEA ({})]", p))
+                                        .color(Color32::from_rgb(56, 176, 0))
+                                        .strong(),
+                                );
+                            } else {
+                                ui.label(
+                                    egui::RichText::new("[TX DESCONECTADO]")
+                                        .color(Color32::from_rgb(248, 113, 113))
+                                        .strong(),
+                                );
+                            }
+                        });
+                    });
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        ui.label("Puerto TX:");
+                        egui::ComboBox::from_id_source("dbg_tx_port")
+                            .selected_text(if self.puerto_seleccionado.is_empty() {
+                                "Sin puertos"
+                            } else {
+                                &self.puerto_seleccionado
+                            })
+                            .show_ui(ui, |ui| {
+                                for p in &self.puertos_disponibles {
+                                    ui.selectable_value(&mut self.puerto_seleccionado, p.port_name.clone(), &p.port_name);
+                                }
+                            });
+
+                        if ui.button("[Refrescar]").clicked() {
+                            self.refrescar_puertos();
+                        }
+
+                        ui.label("Baud:");
+                        egui::ComboBox::from_id_source("dbg_tx_baud")
+                            .selected_text(format!("{}", self.baudrate_seleccionado))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut self.baudrate_seleccionado, 115200, "115200");
+                                ui.selectable_value(&mut self.baudrate_seleccionado, 57600, "57600");
+                                ui.selectable_value(&mut self.baudrate_seleccionado, 9600, "9600");
+                            });
+
+                        let txt_btn = if self.conectado { "[DESCONECTAR TX]" } else { "[CONECTAR TX]" };
+                        if ui.button(txt_btn).clicked() {
+                            self.toggle_conexion();
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        if ui.button("[IDENT TX]").clicked() {
+                            self.serial_worker.send_raw("IDENT\n");
+                            self.agregar_log("[TX]", "Solicitando IDENT a transmisor", Color32::from_rgb(0, 245, 212));
+                        }
+                        if ui.button("[PING TX]").clicked() {
+                            self.serial_worker.send_raw("PING\n");
+                            self.agregar_log("[TX]", "Enviando PING a transmisor", Color32::from_rgb(0, 245, 212));
+                        }
+                        if let Some(ref h) = self.handshake {
+                            ui.label(
+                                egui::RichText::new(format!("Placa: {} | Rol: {} | Firmware: {}", h.placa, h.rol, h.version))
+                                    .color(Color32::from_rgb(0, 245, 212)),
+                            );
+                        } else {
+                            ui.label(egui::RichText::new("Sin handshake IDENT").color(Color32::from_rgb(148, 163, 184)));
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "Paquetes TX: {} | Tasa: {:.1} Hz | Bytes TX: {}",
+                            self.estadisticas.paquetes_tx, self.estadisticas.tasa_tx_hz, self.estadisticas.bytes_tx
+                        ));
+                    });
+                });
+
+                ui.add_space(6.0);
+
+                // 2. TARJETA RECEPTOR A BORDO (RX MONITOR / ENLACE DIRECTO)
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("RECEPTOR ROVER A BORDO (RX - MONITOR BANCO)")
+                                .strong()
+                                .color(Color32::from_rgb(251, 191, 36)),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if self.conectado_rx {
+                                let p = self.puerto_rx_conectado.as_deref().unwrap_or("COM");
+                                ui.label(
+                                    egui::RichText::new(format!("[RX EN LINEA ({})]", p))
+                                        .color(Color32::from_rgb(56, 176, 0))
+                                        .strong(),
+                                );
+                            } else {
+                                ui.label(
+                                    egui::RichText::new("[RX DESCONECTADO]")
+                                        .color(Color32::from_rgb(248, 113, 113))
+                                        .strong(),
+                                );
+                            }
+                        });
+                    });
+                    ui.separator();
+
+                    ui.horizontal(|ui| {
+                        ui.label("Puerto RX:");
+                        egui::ComboBox::from_id_source("dbg_rx_port")
+                            .selected_text(if self.puerto_rx_seleccionado.is_empty() {
+                                "Sin puertos"
+                            } else {
+                                &self.puerto_rx_seleccionado
+                            })
+                            .show_ui(ui, |ui| {
+                                for p in &self.puertos_disponibles {
+                                    ui.selectable_value(&mut self.puerto_rx_seleccionado, p.port_name.clone(), &p.port_name);
+                                }
+                            });
+
+                        ui.label("Baud:");
+                        egui::ComboBox::from_id_source("dbg_rx_baud")
+                            .selected_text(format!("{}", self.baudrate_rx_seleccionado))
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut self.baudrate_rx_seleccionado, 115200, "115200");
+                                ui.selectable_value(&mut self.baudrate_rx_seleccionado, 57600, "57600");
+                                ui.selectable_value(&mut self.baudrate_rx_seleccionado, 9600, "9600");
+                            });
+
+                        let txt_rx_btn = if self.conectado_rx { "[DESCONECTAR RX]" } else { "[CONECTAR RX]" };
+                        if ui.button(txt_rx_btn).clicked() {
+                            self.toggle_conexion_rx();
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        if ui.button("[IDENT RX]").clicked() {
+                            self.serial_rx_worker.send_raw("IDENT\n");
+                            self.agregar_log("[RX]", "Solicitando IDENT a receptor", Color32::from_rgb(251, 191, 36));
+                        }
+                        if ui.button("[PING RX]").clicked() {
+                            self.serial_rx_worker.send_raw("PING\n");
+                            self.agregar_log("[RX]", "Enviando PING a receptor", Color32::from_rgb(251, 191, 36));
+                        }
+                        if let Some(ref h) = self.handshake_rx {
+                            ui.label(
+                                egui::RichText::new(format!("Placa: {} | Rol: {} | Firmware: {}", h.placa, h.rol, h.version))
+                                    .color(Color32::from_rgb(56, 176, 0)),
+                            );
+                        } else {
+                            ui.label(egui::RichText::new("Sin handshake IDENT").color(Color32::from_rgb(148, 163, 184)));
+                        }
+                    });
+
+                    if let Some(ref t) = self.telemetria_rx {
+                        ui.separator();
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "Telemetria RX -> Traccion Izq: {} | Der: {} | S1: {} deg | S2: {} deg | S3: {} deg | S4: {} deg",
+                                t.traccion_izq, t.traccion_der, t.angulo_s1, t.angulo_s2, t.angulo_s3, t.angulo_s4
+                            ))
+                            .color(Color32::from_rgb(147, 197, 253))
+                            .small(),
+                        );
+                    }
+                });
+
+                ui.add_space(6.0);
+
+                // 3. TARJETA SISTEMA DE VERSIONES Y PERFILES DE HARDWARE
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new("SISTEMA DE VERSIONES Y COMPATIBILIDAD")
+                            .strong()
+                            .color(Color32::from_rgb(0, 245, 212)),
+                    );
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("HMI Lunar Rover:").strong());
+                        ui.label("v2.1 Rust High-Performance Edition (Native / WSLg)");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Protocolo Rover:").strong());
+                        ui.label("v2.0 Little-Endian (6B/8B)");
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("Perfil Activo:").strong());
+                        let p_nom = self.registro_perfiles.get_profile(&self.perfil_seleccionado_id).map(|p| p.nombre).unwrap_or("Desconocido");
+                        ui.label(egui::RichText::new(p_nom).color(Color32::from_rgb(0, 245, 212)));
+                    });
+
+                    ui.separator();
+                    ui.label(egui::RichText::new("Perfiles Registrados Soportados:").strong());
+                    for perfil in crate::profiles::PERFILES_OFICIALES {
+                        ui.group(|ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(perfil.nombre).strong().color(Color32::from_rgb(226, 232, 240)));
+                                ui.label(format!("[MCU: {} | FQBN: {}]", perfil.mcu, perfil.fqbn));
+                            });
+                            ui.label(egui::RichText::new(perfil.descripcion).small().color(Color32::from_rgb(148, 163, 184)));
+                        });
+                    }
+                });
+            });
+
+            // =========================================================
+            // COLUMNA DERECHA: COMPARACION DUAL (TX vs RX) Y MONITOR DE CONSOLA
+            // =========================================================
+            columns[1].vertical(|ui| {
+                // 1. COMPARADOR GRAFICO DUAL (TX vs RX)
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("COMPARADOR DUAL DE ESTADO (CONSIGNA TX vs CONFIRMACION RX)")
+                                .strong()
+                                .color(Color32::from_rgb(0, 245, 212)),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let match_ok = if let Some(ref rx) = self.telemetria_rx {
+                                (u16::from(rx.angulo_s1) == self.estado_chasis.servos.s1)
+                                    && (u16::from(rx.angulo_s2) == self.estado_chasis.servos.s2)
+                            } else {
+                                false
+                            };
+                            if match_ok {
+                                ui.label(egui::RichText::new("[SINCRONIZADO]").color(Color32::from_rgb(56, 176, 0)).strong());
+                            } else {
+                                ui.label(egui::RichText::new("[EN ESPERA DE TELEMETRIA]").color(Color32::from_rgb(251, 191, 36)).strong());
+                            }
+                        });
+                    });
+                    ui.separator();
+
+                    ui.columns(2, |dual_cols| {
+                        // Subcolumna 1: Consigna TX (Emitida)
+                        dual_cols[0].vertical(|ui| {
+                            ui.label(egui::RichText::new("Consigna Emitida (HMI TX)").strong().color(Color32::from_rgb(0, 245, 212)));
+                            ui.label(format!("Traccion Izq: {} | Der: {}", self.estado_chasis.traccion_izq, self.estado_chasis.traccion_der));
+                            ui.label(format!("S1 (Del. Izq): {} deg", self.estado_chasis.servos.s1));
+                            ui.label(format!("S2 (Del. Der): {} deg", self.estado_chasis.servos.s2));
+                            ui.label(format!("S3 (Tras. Izq): {} deg", self.estado_chasis.servos.s3));
+                            ui.label(format!("S4 (Tras. Der): {} deg", self.estado_chasis.servos.s4));
+                        });
+
+                        // Subcolumna 2: Confirmacion RX (Receptor)
+                        dual_cols[1].vertical(|ui| {
+                            ui.label(egui::RichText::new("Confirmacion Rover (MCU RX)").strong().color(Color32::from_rgb(251, 191, 36)));
+                            if let Some(ref rx) = self.telemetria_rx {
+                                ui.label(format!("Traccion Izq: {} | Der: {}", rx.traccion_izq, rx.traccion_der));
+                                ui.label(format!("S1 (Del. Izq): {} deg", rx.angulo_s1));
+                                ui.label(format!("S2 (Del. Der): {} deg", rx.angulo_s2));
+                                ui.label(format!("S3 (Tras. Izq): {} deg", rx.angulo_s3));
+                                ui.label(format!("S4 (Tras. Der): {} deg", rx.angulo_s4));
+                            } else {
+                                ui.label(egui::RichText::new("Sin telemetria reportada aun.").italics().color(Color32::from_rgb(148, 163, 184)));
+                                ui.label("Conecte el puerto serie RX para monitorear el rover.");
+                            }
+                        });
+                    });
+                });
+
+                ui.add_space(6.0);
+
+                // 2. MONITOR SERIAL AVANZADO CON FILTROS
+                egui::Frame::group(ui.style()).show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("MONITOR SERIAL DEPURACION").strong().color(Color32::from_rgb(0, 245, 212)));
+                        ui.separator();
+                        ui.selectable_value(&mut self.filtro_log, FiltroLog::Todos, "[TODOS]");
+                        ui.selectable_value(&mut self.filtro_log, FiltroLog::Tx, "[TX]");
+                        ui.selectable_value(&mut self.filtro_log, FiltroLog::Rx, "[RX]");
+                        ui.selectable_value(&mut self.filtro_log, FiltroLog::Mcu, "[MCU]");
+                        ui.selectable_value(&mut self.filtro_log, FiltroLog::Err, "[ERR]");
+                        ui.selectable_value(&mut self.filtro_log, FiltroLog::Sys, "[SYS]");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("[Limpiar]").clicked() {
+                                self.logs.clear();
+                            }
+                        });
+                    });
+
+                    ui.separator();
+
+                    // Area con scroll de registros
+                    egui::ScrollArea::vertical()
+                        .max_height(240.0)
+                        .auto_shrink([false; 2])
+                        .stick_to_bottom(true)
+                        .show(ui, |ui| {
+                            for log in &self.logs {
+                                let mostrar = match self.filtro_log {
+                                    FiltroLog::Todos => true,
+                                    FiltroLog::Tx => log.etiqueta.contains("TX"),
+                                    FiltroLog::Rx => log.etiqueta.contains("RX"),
+                                    FiltroLog::Mcu => log.etiqueta.contains("MCU") || log.etiqueta.contains("IDENT"),
+                                    FiltroLog::Err => log.etiqueta.contains("ERR") || log.color == Color32::from_rgb(248, 113, 113),
+                                    FiltroLog::Sys => log.etiqueta.contains("SYS"),
+                                };
+                                if mostrar {
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new(&log.hora).color(Color32::from_rgb(100, 116, 139)).small());
+                                        ui.label(egui::RichText::new(log.etiqueta).color(log.color).strong().small());
+                                        ui.label(egui::RichText::new(&log.texto).color(Color32::from_rgb(226, 232, 240)).small());
+                                    });
+                                }
+                            }
+                        });
+
+                    ui.separator();
+
+                    // Envio de comandos raw a TX y RX
+                    ui.horizontal(|ui| {
+                        ui.label("Cmd TX:");
+                        let txt_tx = ui.text_edit_singleline(&mut self.texto_comando_personalizado);
+                        let enter_tx = txt_tx.lost_focus() && ui.ctx().input(|i| i.key_pressed(Key::Enter));
+                        if (ui.button("[Enviar TX]").clicked() || enter_tx) && !self.texto_comando_personalizado.trim().is_empty() {
+                            let c = self.texto_comando_personalizado.trim().to_string();
+                            self.serial_worker.send_raw(&c);
+                            self.agregar_log("[TX]", &c, Color32::from_rgb(0, 245, 212));
+                            self.texto_comando_personalizado.clear();
+                        }
+
+                        ui.separator();
+
+                        ui.label("Cmd RX:");
+                        let txt_rx = ui.text_edit_singleline(&mut self.texto_comando_rx);
+                        let enter_rx = txt_rx.lost_focus() && ui.ctx().input(|i| i.key_pressed(Key::Enter));
+                        if (ui.button("[Enviar RX]").clicked() || enter_rx) && !self.texto_comando_rx.trim().is_empty() {
+                            let c = self.texto_comando_rx.trim().to_string();
+                            self.serial_rx_worker.send_raw(&c);
+                            self.agregar_log("[RX]", &c, Color32::from_rgb(251, 191, 36));
+                            self.texto_comando_rx.clear();
+                        }
+                    });
+                });
+            });
         });
     }
-}
 
-impl RoverApp {
     /// Renderiza una rueda rotada segun el angulo de su servomotor y dibuja su vector de velocidad con flecha.
     fn dibujar_rueda(
         painter: &egui::Painter,
@@ -1572,3 +2144,31 @@ impl RoverApp {
         }
     }
 }
+
+/// Parsea una linea de telemetria emitida por el receptor a bordo (ej. "RX -> Izq: 150 | Der: 150 | S1: 90 | S2: 90 | S3: 90 | S4: 90").
+pub fn parsear_telemetria_rx_str(linea: &str) -> Option<TelemetriaRoverRx> {
+    let mut telem = TelemetriaRoverRx::default();
+    let partes: Vec<&str> = linea.split('|').collect();
+    for p in partes {
+        let kv: Vec<&str> = p.split(':').collect();
+        if kv.len() == 2 {
+            let k = kv[0].trim();
+            let v = kv[1].trim().parse::<i32>().unwrap_or(0);
+            if k.contains("Izq") {
+                telem.traccion_izq = v as i16;
+            } else if k.contains("Der") {
+                telem.traccion_der = v as i16;
+            } else if k.contains("S1") {
+                telem.angulo_s1 = v.clamp(10, 170) as u8;
+            } else if k.contains("S2") {
+                telem.angulo_s2 = v.clamp(10, 170) as u8;
+            } else if k.contains("S3") {
+                telem.angulo_s3 = v.clamp(10, 170) as u8;
+            } else if k.contains("S4") {
+                telem.angulo_s4 = v.clamp(10, 170) as u8;
+            }
+        }
+    }
+    Some(telem)
+}
+
