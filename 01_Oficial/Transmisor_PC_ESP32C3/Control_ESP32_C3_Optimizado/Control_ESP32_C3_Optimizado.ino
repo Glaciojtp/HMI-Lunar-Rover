@@ -163,4 +163,7 @@ void loop() {
     ultimoEnvioRF = millis();
     radio.write(&datosControl, sizeof(datosControl));
   }
+
+  // Ceder CPU y alimentar Task Watchdog del ESP32-C3
+  delay(2);
 }

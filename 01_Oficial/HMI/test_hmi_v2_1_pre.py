@@ -156,6 +156,72 @@ class TestInicializacionHMIOficialPre(unittest.TestCase):
         trama = formatear_trama_calibracion(trims, servos)
         self.assertEqual(trama, "CALIB,100,100,100,100,100,100,90,90,90,90\n")
 
+    def test_direccion_flechas_traccion_colineal_con_rueda(self):
+        with patch.object(HMIRoverRockerBogieV21Pre, "crear_widgets"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "iniciar_hilos_segundo_plano"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "actualizar_telemetria_ui"):
+            app = HMIRoverRockerBogieV21Pre(self.mock_root)
+            mock_canvas = MagicMock()
+
+            # Caso 1: Rueda inclinada a la izquierda (120 deg), avance (pwm > 0)
+            mock_canvas.reset_mock()
+            app.dibujar_rueda_orientada(mock_canvas, 100, 100, 120, "#38b000", "M1", pwm=150)
+            self.assertTrue(mock_canvas.create_line.called)
+            args, kwargs = mock_canvas.create_line.call_args
+            x1, y1, x2, y2 = args[0], args[1], args[2], args[3]
+            dx = x2 - x1
+            dy = y2 - y1
+            self.assertLess(dx, 0, f"Para giro a la izquierda (120 deg), la flecha debe apuntar a la izquierda (dx < 0), pero dio dx={dx}")
+            self.assertLess(dy, 0, f"Para avance (pwm > 0), la flecha debe apuntar hacia arriba (dy < 0), pero dio dy={dy}")
+
+            # Caso 2: Rueda inclinada a la derecha (60 deg), avance (pwm > 0)
+            mock_canvas.reset_mock()
+            app.dibujar_rueda_orientada(mock_canvas, 100, 100, 60, "#38b000", "M4", pwm=150)
+            self.assertTrue(mock_canvas.create_line.called)
+            args, kwargs = mock_canvas.create_line.call_args
+            x1, y1, x2, y2 = args[0], args[1], args[2], args[3]
+            dx = x2 - x1
+            dy = y2 - y1
+            self.assertGreater(dx, 0, f"Para giro a la derecha (60 deg), la flecha debe apuntar a la derecha (dx > 0), pero dio dx={dx}")
+            self.assertLess(dy, 0, f"Para avance (pwm > 0), la flecha debe apuntar hacia arriba (dy < 0), pero dio dy={dy}")
+
+    def test_desconexion_abrupta_cierra_puerto_y_inicia_reconexion(self):
+        """Verifica que un fallo de E/S serial cierre el handle y active reconexion sin crash."""
+        with patch('tkinter.Tk'):
+            mock_root = MagicMock()
+            app = HMIRoverRockerBogieV21Pre(mock_root)
+            mock_serial = MagicMock()
+            mock_serial.is_open = True
+            app.serial_conn = mock_serial
+            app.conectado = True
+            app.cb_puertos.get.return_value = "COM3"
+
+            app.notificar_desconexion_abrupta("ClearCommError failed")
+            self.assertFalse(app.conectado)
+            self.assertIsNone(app.serial_conn)
+            self.assertEqual(app.ultimo_puerto_desconectado, "COM3")
+            mock_serial.close.assert_called_once()
+
+    def test_rate_limiter_transmision(self):
+        """Verifica que enviar_trama_actual respete el limite de frecuencia de transmision."""
+        with patch('tkinter.Tk'):
+            mock_root = MagicMock()
+            app = HMIRoverRockerBogieV21Pre(mock_root)
+            mock_serial = MagicMock()
+            mock_serial.is_open = True
+            app.serial_conn = mock_serial
+            app.conectado = True
+
+            # Primer envio pasa
+            app.enviar_trama_actual()
+            self.assertEqual(mock_serial.write.call_count, 1)
+
+            # Segundo envio inmediato debe ser diferido (rate limited)
+            app.enviar_trama_actual()
+            self.assertEqual(mock_serial.write.call_count, 1)
+            self.assertTrue(app._tx_pendiente)
+
 
 if __name__ == "__main__":
     unittest.main()
+

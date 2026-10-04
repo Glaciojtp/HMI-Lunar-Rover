@@ -212,4 +212,7 @@ void loop() {
   if (millis() - ultimaRecepcion > TIMEOUT_MS) {
     pararMotores();
   }
+
+  // Ceder tiempo al planificador de FreeRTOS para alimentar el Task Watchdog y estabilizar consumo
+  delay(2);
 }

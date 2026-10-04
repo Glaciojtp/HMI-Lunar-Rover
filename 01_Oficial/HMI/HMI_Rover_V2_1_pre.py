@@ -110,6 +110,16 @@ class HMIRoverRockerBogieV21Pre:
         self._log_buffer = []
         self._actualizando_desde_teclas = False
 
+        # Reconexion automatica y control de flujo TX
+        self.auto_reconectar = tk.BooleanVar(value=True) if tk else None
+        self.ultimo_puerto_desconectado = None
+        self._ultimo_tiempo_tx = 0.0
+        self._tx_pendiente = False
+        self._ultimo_raw_enviado = b""
+        self._bloqueo_tx = threading.Lock()
+        self.hilo_reconexion = None
+        self.hilo_tx_stream = None
+
         # Estado dinamico de control
         self.comando_actual = " "
         self.modo_conduccion = tk.StringVar(value="ACKERMANN")  # ACKERMANN, POINT_TURN, CRAB, MANUAL
@@ -263,9 +273,16 @@ class HMIRoverRockerBogieV21Pre:
         self.cb_modo.pack(side="left", padx=2)
         self.cb_modo.bind("<<ComboboxSelected>>", self.cambiar_modo_conduccion)
 
+        # Checkbox Auto-reconexion
+        self.chk_auto = tk.Checkbutton(top_frame, text="Auto-reconnect", variable=self.auto_reconectar,
+                                       bg="#212433", fg="#94a3b8", selectcolor="#0c0e17",
+                                       activebackground="#212433", activeforeground="#00f5d4",
+                                       font=("Segoe UI", 8), takefocus=0)
+        self.chk_auto.pack(side="left", padx=4)
+
         # Indicador de Estado
         self.lbl_estado_badge = tk.Label(top_frame, text="[DESCONECTADO]", bg="#374151", fg="#f87171",
-                                         font=("Segoe UI", 9, "bold"), padx=6, pady=2, width=14)
+                                         font=("Segoe UI", 9, "bold"), padx=6, pady=2, width=16)
         self.lbl_estado_badge.pack(side="right", padx=2)
 
         # =========================================================================
@@ -889,11 +906,21 @@ class HMIRoverRockerBogieV21Pre:
         c.create_text(x, y, text=etiqueta, fill="#ffffff", font=("Segoe UI", 6, "bold"))
 
         if pwm != 0:
-            longitud_vector = 14
+            arrow_color = "#34d399" if pwm > 0 else "#f97316"
+            longitud = 8 + int((min(255, abs(pwm)) / 255.0) * 10)
             signo = 1.0 if pwm > 0 else -1.0
-            vx = -signo * sin_t * longitud_vector
-            vy = -signo * cos_t * longitud_vector
-            c.create_line(x, y, x + vx, y + vy, fill="#ffff00", width=2, arrow=tk.LAST)
+
+            ux = math.sin(theta)
+            uy = -math.cos(theta)
+
+            x_ini = x + signo * (hh * 0.4) * ux
+            y_ini = y + signo * (hh * 0.4) * uy
+            x_fin = x + signo * (hh + longitud) * ux
+            y_fin = y + signo * (hh + longitud) * uy
+
+            c.create_line(x_ini, y_ini, x_fin, y_fin,
+                          fill=arrow_color, width=2,
+                          arrow=tk.LAST, arrowshape=(6, 8, 3))
 
     def actualizar_lista_puertos(self):
         if not SERIAL_DISPONIBLE:
@@ -944,7 +971,7 @@ class HMIRoverRockerBogieV21Pre:
             return
 
         if self.conectado:
-            self.desconectar()
+            self.desconectar(manual=True)
         else:
             puerto = self.cb_puertos.get()
             if not puerto or puerto == "Sin puertos":
@@ -964,6 +991,7 @@ class HMIRoverRockerBogieV21Pre:
                 time.sleep(0.15)
                 self.serial_conn.dtr = True
                 self.conectado = True
+                self.ultimo_puerto_desconectado = None
                 self.btn_conectar.config(text="DESCONECTAR", bg="#e63946", fg="#ffffff")
                 self.lbl_estado_badge.config(text="[CONECTADO]", bg="#064e3b", fg="#34d399")
                 self.log_consola("SYS", f"Conexion exitosa en {puerto} a {baud} baud.")
@@ -974,16 +1002,92 @@ class HMIRoverRockerBogieV21Pre:
                     messagebox.showerror("Error de Conexion", f"No se pudo abrir {puerto}:\n{e}")
                 self.log_consola("ERR", f"Error al abrir {puerto}: {e}")
 
-    def desconectar(self):
+    def desconectar(self, manual=True):
         self.conectado = False
+        if manual:
+            self.ultimo_puerto_desconectado = None
         if self.serial_conn and self.serial_conn.is_open:
             try:
                 self.serial_conn.close()
             except Exception:
                 pass
+        self.serial_conn = None
         self.btn_conectar.config(text="CONECTAR", bg="#00f5d4", fg="#0f172a")
         self.lbl_estado_badge.config(text="[DESCONECTADO]", bg="#374151", fg="#f87171")
         self.log_consola("SYS", "Puerto serial desconectado.")
+
+    def notificar_desconexion_abrupta(self, motivo=""):
+        if not self.conectado:
+            return
+        self.conectado = False
+        self.ultimo_puerto_desconectado = self.cb_puertos.get()
+        if self.serial_conn:
+            try:
+                self.serial_conn.close()
+            except Exception:
+                pass
+            self.serial_conn = None
+
+        def _actualizar_ui():
+            self.btn_conectar.config(text="CONECTAR", bg="#00f5d4", fg="#0f172a")
+            self.lbl_estado_badge.config(text="[RECONECTANDO...]", bg="#7c2d12", fg="#fb923c")
+            self.log_consola("WARN", f"Perdida de comunicacion serial ({motivo}). Buscando reconexion automatica...")
+
+        if hasattr(self, 'root') and self.root:
+            try:
+                self.root.after(0, _actualizar_ui)
+            except Exception:
+                pass
+
+    def intentar_reconectar_puerto(self, puerto):
+        baud = int(self.cb_baud.get()) if hasattr(self, 'cb_baud') else 115200
+        try:
+            conn = serial.Serial()
+            conn.port = puerto
+            conn.baudrate = baud
+            conn.timeout = 0.1
+            conn.rts = False
+            conn.dtr = False
+            conn.open()
+            time.sleep(0.15)
+            conn.dtr = True
+            self.serial_conn = conn
+            self.conectado = True
+            self.ultimo_puerto_desconectado = None
+
+            def _exito():
+                self.cb_puertos.set(puerto)
+                self.btn_conectar.config(text="DESCONECTAR", bg="#e63946", fg="#ffffff")
+                self.lbl_estado_badge.config(text="[CONECTADO]", bg="#064e3b", fg="#34d399")
+                self.log_consola("SYS", f"Reconexion automatica exitosa en {puerto} a {baud} baud.")
+                self.ident_o_ping()
+
+            if hasattr(self, 'root') and self.root:
+                self.root.after(0, _exito)
+        except Exception:
+            pass
+
+    def bucle_reconexion_automatica(self):
+        while self.ejecutando:
+            if getattr(self, 'auto_reconectar', None) and self.auto_reconectar.get() and not self.conectado and self.ultimo_puerto_desconectado:
+                try:
+                    if SERIAL_DISPONIBLE:
+                        puertos_actuales = [p.device for p in serial.tools.list_ports.comports()]
+                        puerto_a_intentar = None
+                        if self.ultimo_puerto_desconectado in puertos_actuales:
+                            puerto_a_intentar = self.ultimo_puerto_desconectado
+                        elif puertos_actuales:
+                            for p in serial.tools.list_ports.comports():
+                                if p.vid and p.pid:
+                                    perfil = self.registry.buscar_por_vid_pid(p.vid, p.pid)
+                                    if perfil:
+                                        puerto_a_intentar = p.device
+                                        break
+                        if puerto_a_intentar:
+                            self.intentar_reconectar_puerto(puerto_a_intentar)
+                except Exception:
+                    pass
+            time.sleep(1.0)
 
     def ident_o_ping(self):
         if not self.conectado or not self.serial_conn or not self.serial_conn.is_open:
@@ -994,8 +1098,9 @@ class HMIRoverRockerBogieV21Pre:
             self.log_consola("TX", "[TX IDENT -> MCU]: Solicitando identificacion de firmware...")
         except Exception as e:
             self.log_consola("ERR", f"Error enviando IDENT: {e}")
+            self.notificar_desconexion_abrupta(str(e))
 
-    def enviar_trama_actual(self):
+    def enviar_trama_actual(self, forzar=False):
         cmd = self.comando_actual.upper()
         if cmd == " ":
             cmd = "STOP"
@@ -1037,11 +1142,22 @@ class HMIRoverRockerBogieV21Pre:
         trama = f"{cmd},{abs(pot_izq)},{abs(pot_der)},{s1},{s2},{s3},{s4}\n"
         raw_bytes = trama.encode('ascii')
 
-        try:
-            self.serial_conn.write(raw_bytes)
-            self.paquetes_tx_contador += 1
-        except Exception as e:
-            self.log_consola("ERR", f"Error TX: {e}")
+        ahora = time.time()
+        with self._bloqueo_tx:
+            # Control de flujo / rate-limiter: max 25 Hz (40 ms) para proteger buffers USB CDC y evitar WDT en MCU
+            if not forzar and (ahora - self._ultimo_tiempo_tx < 0.040):
+                self._tx_pendiente = True
+                return
+
+            try:
+                self.serial_conn.write(raw_bytes)
+                self.paquetes_tx_contador += 1
+                self._ultimo_tiempo_tx = ahora
+                self._ultimo_raw_enviado = raw_bytes
+                self._tx_pendiente = False
+            except Exception as e:
+                self.log_consola("ERR", f"Error TX: {e}")
+                self.notificar_desconexion_abrupta(str(e))
 
     def sincronizar_calibracion(self):
         if not self.conectado or not self.serial_conn or not self.serial_conn.is_open:
@@ -1114,6 +1230,18 @@ class HMIRoverRockerBogieV21Pre:
         self.hilo_serial.start()
         self.hilo_joy = threading.Thread(target=self.bucle_recepcion_joy, daemon=True)
         self.hilo_joy.start()
+        self.hilo_reconexion = threading.Thread(target=self.bucle_reconexion_automatica, daemon=True)
+        self.hilo_reconexion.start()
+        self.hilo_tx_stream = threading.Thread(target=self.bucle_transmision_periodica, daemon=True)
+        self.hilo_tx_stream.start()
+
+    def bucle_transmision_periodica(self):
+        while self.ejecutando:
+            time.sleep(0.05)  # 20 Hz continuo
+            if self.conectado and self.serial_conn and self.serial_conn.is_open:
+                ahora = time.time()
+                if self._tx_pendiente or (self.comando_actual != "STOP" and ahora - self._ultimo_tiempo_tx >= 0.05):
+                    self.enviar_trama_actual(forzar=True)
 
     def bucle_recepcion_serial(self):
         while self.ejecutando:
@@ -1123,8 +1251,8 @@ class HMIRoverRockerBogieV21Pre:
                         linea = self.serial_conn.readline().decode('utf-8', errors='ignore').strip()
                         if linea:
                             self.procesar_linea_serial(linea)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self.notificar_desconexion_abrupta(str(e))
             time.sleep(0.01)
 
     def procesar_linea_serial(self, linea):
