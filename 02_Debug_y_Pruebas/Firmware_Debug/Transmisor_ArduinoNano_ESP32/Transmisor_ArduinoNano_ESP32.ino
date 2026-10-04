@@ -35,6 +35,7 @@
 #include <nRF24L01.h>
 #include <stdint.h>
 #include <string.h>
+#include "PaqueteControl.h"
 
 // ==========================================
 // CONFIGURACION DE PINES DE HARDWARE
@@ -77,22 +78,16 @@
 #define LED_APAGADO   HIGH
 
 // ==========================================
-// ESTRUCTURA BINARIA ESTRICTA (6 BYTES)
+// ESTRUCTURA BINARIA ESTRICTA (8 BYTES)
+// Definida en PaqueteControl.h
 // ==========================================
-struct __attribute__((packed)) Paquete {
-  int16_t traccion_izq;  // -255 a 255 (negativo: reversa, positivo: avance)
-  int16_t traccion_der;  // -255 a 255 (control independiente)
-  uint8_t angulo_s1;     // 10 a 170 grados (servomotor de direccion 1)
-  uint8_t angulo_s2;     // 10 a 170 grados (servomotor de direccion 2)
-};
-
-static_assert(sizeof(Paquete) == 6, "El tamano de la estructura Paquete debe ser exactamente 6 bytes");
+static_assert(sizeof(PaqueteControl) == 8, "El tamano de la estructura PaqueteControl debe ser exactamente 8 bytes");
 
 // ==========================================
 // CONFIGURACION DE RADIOFRECUENCIA NRF24L01
 // ==========================================
 RF24 radio(PIN_RF_CE, PIN_RF_CSN);
-const uint64_t DIRECCION_RF = 0xF0F0F0F0E1LL;
+const byte DIRECCION_RF[6] = "ROVER";
 
 bool radioInicializada = false;
 unsigned long ultimoIntentoRadio = 0;
@@ -129,16 +124,16 @@ void actualizarLed() {
 // GESTION DE RADIOFRECUENCIA
 // ==========================================
 void configurarRadio() {
-  radio.setPayloadSize(sizeof(Paquete)); // 6 bytes exactos
-  radio.setPALevel(RF24_PA_MAX);         // Maxima potencia de emision
-  radio.setDataRate(RF24_250KBPS);       // 250 kbps (Maxima penetracion y sensibilidad)
-  radio.setChannel(108);                 // Canal 108 (2.508 GHz, fuera del rango Wi-Fi)
-  radio.setAutoAck(false);               // Modo streaming continuo de baja latencia
+  radio.setPayloadSize(sizeof(PaqueteControl)); // 8 bytes exactos
+  radio.setPALevel(RF24_PA_MAX);                // Maxima potencia de emision
+  radio.setDataRate(RF24_250KBPS);              // 250 kbps (Maxima penetracion y sensibilidad)
+  radio.setChannel(108);                        // Canal 108 (2.508 GHz, fuera del rango Wi-Fi)
+  radio.setAutoAck(false);                      // Modo streaming continuo de baja latencia
   radio.openWritingPipe(DIRECCION_RF);
-  radio.stopListening();                 // Modo transmision activo
+  radio.stopListening();                        // Modo transmision activo
 }
 
-bool enviarPaqueteRF(const Paquete& paquete) {
+bool enviarPaqueteRF(const PaqueteControl& paquete) {
   if (!radioInicializada) {
     dispararPulsoLed(true, false, false, 50); // Pulso rojo de 50 ms por falla de radio
     return false;
@@ -187,13 +182,16 @@ void procesarComando(char* cmdStr) {
 
   // Parada de emergencia directa
   if (strcasecmp(cmdStr, "STOP") == 0 || strcasecmp(cmdStr, "PARAR") == 0) {
-    Paquete paquete;
+    PaqueteControl paquete;
     paquete.traccion_izq = 0;
     paquete.traccion_der = 0;
     paquete.angulo_s1 = 90;
     paquete.angulo_s2 = 90;
+    paquete.angulo_s3 = 90;
+    paquete.angulo_s4 = 90;
     enviarPaqueteRF(paquete);
     Serial.println(F("STATUS:STOP"));
+    Serial.println(F("TLM_TX:0,0,90,90,90,90"));
     return;
   }
 
@@ -221,41 +219,31 @@ void procesarComando(char* cmdStr) {
   int v2 = atoi(tokens[2]);
   int v3 = atoi(tokens[3]);
   int v4 = atoi(tokens[4]);
+  int v5 = (numTokens >= 6) ? atoi(tokens[5]) : v3;
+  int v6 = (numTokens >= 7) ? atoi(tokens[6]) : v4;
 
-  Paquete paquete;
+  PaqueteControl paquete;
+  paquete.angulo_s1 = (uint8_t)constrain(v3, 10, 170);
+  paquete.angulo_s2 = (uint8_t)constrain(v4, 10, 170);
+  paquete.angulo_s3 = (uint8_t)constrain(v5, 10, 170);
+  paquete.angulo_s4 = (uint8_t)constrain(v6, 10, 170);
 
-  // Comando oficial estandarizado: CMD,izq,der,s1,s2
+  // Comando oficial estandarizado: CMD,izq,der,s1,s2,s3,s4
   if (strcasecmp(comando, "CMD") == 0) {
     paquete.traccion_izq = (int16_t)constrain(v1, -255, 255);
     paquete.traccion_der = (int16_t)constrain(v2, -255, 255);
-    paquete.angulo_s1    = (uint8_t)constrain(v3, 10, 170);
-    paquete.angulo_s2    = (uint8_t)constrain(v4, 10, 170);
-
-    bool ok = enviarPaqueteRF(paquete);
-    if (ok) {
-      Serial.println(F("STATUS:OK"));
-    } else {
-      Serial.println(F("STATUS:TX_ERROR"));
-    }
-    return;
-  }
-
-  // Compatibilidad con comandos de direccion directa (W, S, A, D, PIVOT, CRAB)
-  paquete.angulo_s1 = (uint8_t)constrain(v3, 10, 170);
-  paquete.angulo_s2 = (uint8_t)constrain(v4, 10, 170);
-
-  if (strcasecmp(comando, "W") == 0) {
-    paquete.traccion_izq = (int16_t)constrain(abs(v1), 0, 255);
-    paquete.traccion_der = (int16_t)constrain(abs(v2), 0, 255);
+  } else if (strcasecmp(comando, "W") == 0) {
+    paquete.traccion_izq = (int16_t)constrain(v1, -255, 255);
+    paquete.traccion_der = (int16_t)constrain(v2, -255, 255);
   } else if (strcasecmp(comando, "S") == 0) {
-    paquete.traccion_izq = (int16_t)-constrain(abs(v1), 0, 255);
-    paquete.traccion_der = (int16_t)-constrain(abs(v2), 0, 255);
+    paquete.traccion_izq = (int16_t)-constrain(v1, -255, 255);
+    paquete.traccion_der = (int16_t)-constrain(v2, -255, 255);
   } else if (strcasecmp(comando, "PIVOT_IZQ") == 0) {
-    paquete.traccion_izq = (int16_t)-constrain(abs(v1), 0, 255);
-    paquete.traccion_der = (int16_t)constrain(abs(v2), 0, 255);
+    paquete.traccion_izq = (int16_t)-constrain(v1, -255, 255);
+    paquete.traccion_der = (int16_t)constrain(v2, -255, 255);
   } else if (strcasecmp(comando, "PIVOT_DER") == 0) {
-    paquete.traccion_izq = (int16_t)constrain(abs(v1), 0, 255);
-    paquete.traccion_der = (int16_t)-constrain(abs(v2), 0, 255);
+    paquete.traccion_izq = (int16_t)constrain(v1, -255, 255);
+    paquete.traccion_der = (int16_t)-constrain(v2, -255, 255);
   } else if (strcasecmp(comando, "A") == 0 || strcasecmp(comando, "D") == 0 || strcasecmp(comando, "CRAB") == 0) {
     paquete.traccion_izq = (int16_t)constrain(v1, -255, 255);
     paquete.traccion_der = (int16_t)constrain(v2, -255, 255);
@@ -266,7 +254,14 @@ void procesarComando(char* cmdStr) {
 
   bool ok = enviarPaqueteRF(paquete);
   if (ok) {
-    Serial.println(F("STATUS:OK"));
+    Serial.println(F("STATUS:OK_4SERVO"));
+    Serial.print(F("TLM_TX:"));
+    Serial.print(paquete.traccion_izq); Serial.print(F(","));
+    Serial.print(paquete.traccion_der); Serial.print(F(","));
+    Serial.print(paquete.angulo_s1); Serial.print(F(","));
+    Serial.print(paquete.angulo_s2); Serial.print(F(","));
+    Serial.print(paquete.angulo_s3); Serial.print(F(","));
+    Serial.println(paquete.angulo_s4);
   } else {
     Serial.println(F("STATUS:TX_ERROR"));
   }
