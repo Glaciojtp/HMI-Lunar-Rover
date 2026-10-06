@@ -172,11 +172,16 @@ bool invertirDirDer = false;   // Por defecto FALSE: lado derecho estandar
 bool invertirLogicaPwm = false;// Por defecto FALSE: logica estandar directa (0 = STOP, PWM = marcha)
 
 // ==========================================
-// CONFIGURACION Y CALIBRACION DE SERVOS 360 (ROTACION CONTINUA)
+// CONFIGURACION Y CALIBRACION DE SERVOS (MODO DUAL 180 / 360)
 // ==========================================
 Preferences nvsPrefs;
 
-// Microsegundos de neutro exacto (STOP absoluto) para cada servo (calibrables)
+// Modo de operacion de los servomotores:
+// false = Servos de rotacion continua 360 (pulsos temporizados y freno a neutro en microsegundos)
+// true  = Servos posicionales estandar 180 (angulo directo [10, 170] grados via write)
+bool modoServos180 = false;
+
+// Microsegundos de neutro exacto (STOP absoluto) para cada servo (calibrables en modo 360)
 int neutroS1 = 1500;
 int neutroS2 = 1500;
 int neutroS3 = 1500;
@@ -212,15 +217,23 @@ unsigned long tiempoInicioPulsoGiro = 0;
 unsigned long tiempoDuracionPulsoActual = 0;
 
 void frenarServosNeutro() {
-  servo1.writeMicroseconds(neutroS1);
-  servo2.writeMicroseconds(neutroS2);
-  servo3.writeMicroseconds(neutroS3);
-  servo4.writeMicroseconds(neutroS4);
+  if (modoServos180) {
+    servo1.write(90);
+    servo2.write(90);
+    servo3.write(90);
+    servo4.write(90);
+  } else {
+    servo1.writeMicroseconds(neutroS1);
+    servo2.writeMicroseconds(neutroS2);
+    servo3.writeMicroseconds(neutroS3);
+    servo4.writeMicroseconds(neutroS4);
+  }
   pulsoGiroEnProgreso = false;
 }
 
 void cargarCalibracionNVS() {
   nvsPrefs.begin("rover_calib", true);
+  modoServos180 = nvsPrefs.getBool("m180", false);
   neutroS1 = nvsPrefs.getInt("s1", 1500);
   neutroS2 = nvsPrefs.getInt("s2", 1500);
   neutroS3 = nvsPrefs.getInt("s3", 1500);
@@ -234,7 +247,8 @@ void cargarCalibracionNVS() {
   invertirSentidoServos = nvsPrefs.getBool("inv", false);
   nvsPrefs.end();
 
-  Serial.println(F("[NVS] Calibracion de Servos 360 cargada:"));
+  Serial.println(F("[NVS] Calibracion de Servos cargada desde Flash:"));
+  Serial.print(F("      Modo Servos: ")); Serial.println(modoServos180 ? F("180 POSICIONAL") : F("360 CONTINUO"));
   Serial.print(F("      S1: ")); Serial.print(neutroS1); Serial.print(F(" us (dir=")); Serial.print(dirS1);
   Serial.print(F(") | S2: ")); Serial.print(neutroS2); Serial.print(F(" us (dir=")); Serial.print(dirS2);
   Serial.print(F(") | S3: ")); Serial.print(neutroS3); Serial.print(F(" us (dir=")); Serial.print(dirS3);
@@ -246,6 +260,7 @@ void cargarCalibracionNVS() {
 
 void guardarCalibracionNVS() {
   nvsPrefs.begin("rover_calib", false);
+  nvsPrefs.putBool("m180", modoServos180);
   nvsPrefs.putInt("s1", neutroS1);
   nvsPrefs.putInt("s2", neutroS2);
   nvsPrefs.putInt("s3", neutroS3);
@@ -424,9 +439,16 @@ void procesarControl(int16_t traccionIzq, int16_t traccionDer, uint8_t s1, uint8
   unsigned long dt = (ultimaRecepcion > 0) ? (ahora - ultimaRecepcion) : 0;
   ultimaRecepcion = ahora;
 
-  // 1. Aplicar traccion y direccion temporizada para servos 360
+  // 1. Aplicar traccion y direccion segun el modo de servomotores configurado
   aplicarControlMotores(traccionIzq, traccionDer);
-  aplicarDireccion360(s1, s2, s3, s4);
+  if (modoServos180) {
+    servo1.write(constrain(s1, 10, 170));
+    servo2.write(constrain(s2, 10, 170));
+    servo3.write(constrain(s3, 10, 170));
+    servo4.write(constrain(s4, 10, 170));
+  } else {
+    aplicarDireccion360(s1, s2, s3, s4);
+  }
 
   // 2. Telemetria estructurada hacia el puerto USB Serie (para HMI Debug en COM21)
   Serial.print(F("TLM:"));
@@ -463,10 +485,45 @@ void procesarPaquete(const PaqueteControl& paquete) {
 }
 
 void procesarComandoSerial(const String& cmd) {
+  ultimaRecepcion = millis(); // Mantener vivo el watchdog ante comandos manuales e interactivos
+
   if (cmd == "IDENT") {
     Serial.println(F("ID:NANO_ESP32:RX:v2.2"));
   } else if (cmd == "PING") {
     Serial.println(F("PONG:NANO_ESP32_OK"));
+  } else if (cmd.startsWith("MODO:SERVOS,")) {
+    int m = cmd.substring(12).toInt();
+    modoServos180 = (m == 180);
+    if (modoServos180) {
+      Serial.println(F("[MODO] Servos configurados en: MODO 180 POSICIONAL (write angulo directo)."));
+      servo1.write(90); servo2.write(90); servo3.write(90); servo4.write(90);
+    } else {
+      Serial.println(F("[MODO] Servos configurados en: MODO 360 CONTINUO (pulsos temporizados y neutro us)."));
+      frenarServosNeutro();
+    }
+  } else if (cmd == "MODO:SERVOS?" || cmd == "MODO?") {
+    Serial.print(F("[MODO] Servos actuales: "));
+    Serial.println(modoServos180 ? F("180 POSICIONAL") : F("360 CONTINUO"));
+  } else if (cmd.startsWith("MOT:IZQ,")) {
+    int pwm = cmd.substring(8).toInt();
+    aplicarControlMotores(pwm, 0);
+    Serial.print(F("[MOT] Motor Izquierdo fijado a PWM ")); Serial.println(pwm);
+  } else if (cmd.startsWith("MOT:DER,")) {
+    int pwm = cmd.substring(8).toInt();
+    aplicarControlMotores(0, pwm);
+    Serial.print(F("[MOT] Motor Derecho fijado a PWM ")); Serial.println(pwm);
+  } else if (cmd.startsWith("MOT:AMBOS,")) {
+    int sep = cmd.indexOf(',', 10);
+    if (sep > 0) {
+      int pI = cmd.substring(10, sep).toInt();
+      int pD = cmd.substring(sep + 1).toInt();
+      aplicarControlMotores(pI, pD);
+      Serial.print(F("[MOT] Traccion fijada Izq=")); Serial.print(pI);
+      Serial.print(F(" Der=")); Serial.println(pD);
+    }
+  } else if (cmd == "MOT:PARAR") {
+    pararMotores();
+    Serial.println(F("[MOT] Traccion detenida."));
   } else if (cmd == "MOTORES:OFF") {
     motoresHabilitados = false;
     pararMotores();
@@ -574,7 +631,8 @@ void procesarComandoSerial(const String& cmd) {
   } else if (cmd == "GUARDAR" || cmd == "GUARDAR:CALIB" || cmd == "SAVE" || cmd == "CALIB:SAVE") {
     guardarCalibracionNVS();
   } else if (cmd == "VER" || cmd == "VER:CALIB" || cmd == "CALIB:VER" || cmd == "AYUDA" || cmd == "HELP") {
-    Serial.println(F("=== ESTADO ACTUAL DE CALIBRACION SERVOS 360 ==="));
+    Serial.println(F("=== ESTADO ACTUAL DE CALIBRACION SERVOS ==="));
+    Serial.print(F("  Modo Servos   : ")); Serial.println(modoServos180 ? F("180 POSICIONAL (angulo directo)") : F("360 CONTINUO (pulsos/neutro)"));
     Serial.print(F("  S1 (Del. Izq) : ")); Serial.print(neutroS1); Serial.print(F(" us | dir: ")); Serial.println(dirS1);
     Serial.print(F("  S2 (Del. Der) : ")); Serial.print(neutroS2); Serial.print(F(" us | dir: ")); Serial.println(dirS2);
     Serial.print(F("  S3 (Tras. Izq): ")); Serial.print(neutroS3); Serial.print(F(" us | dir: ")); Serial.println(dirS3);
