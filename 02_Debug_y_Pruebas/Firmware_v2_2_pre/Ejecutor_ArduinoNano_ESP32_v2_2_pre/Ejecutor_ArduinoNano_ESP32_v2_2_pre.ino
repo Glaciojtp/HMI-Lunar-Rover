@@ -464,7 +464,7 @@ void procesarPaquete(const PaqueteControl& paquete) {
 
 void procesarComandoSerial(const String& cmd) {
   if (cmd == "IDENT") {
-    Serial.println(F("ID:NANO_ESP32:RX:v2.1"));
+    Serial.println(F("ID:NANO_ESP32:RX:v2.2"));
   } else if (cmd == "PING") {
     Serial.println(F("PONG:NANO_ESP32_OK"));
   } else if (cmd == "MOTORES:OFF") {
