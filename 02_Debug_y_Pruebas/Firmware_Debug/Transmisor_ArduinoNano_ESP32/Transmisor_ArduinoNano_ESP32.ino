@@ -1,68 +1,45 @@
 /*
  * =====================================================================================
- *  TRANSMISOR ARDUINO NANO ESP32 — ROVER LUNAR V2.0 (PUENTE USB-CDC A RF24)
- *  Plataforma Oficial de Transmision Terrena (Dongle PC / Control Remoto)
+ *  TRANSMISOR ARDUINO NANO ESP32 — ROVER LUNAR V2.2-PRE (PUENTE USB CDC A WI-FI UDP)
+ *  Dongle USB PC para Pilotaje sin Joysticks Fisicos
  * =====================================================================================
- *  Hardware: Arduino Nano ESP32 (ESP32-S3 a 3.3V) + Transceptor NRF24L01+
+ *  Hardware: Arduino Nano ESP32 (ESP32-S3 a 3.3V nativo) conectado por USB a la PC
+ *  Enlace Inalambrico: Wi-Fi Nativo (Modo Estacion STA + Sockets UDP en puerto 4210)
  *
- *  ASIGNACION DE PINES:
- *    - NRF24L01 CE:   Pin D9  (GPIO 18)
- *    - NRF24L01 CSN:  Pin D10 (GPIO 21)
- *    - NRF24L01 MOSI: Pin D11 (GPIO 38 - SPI Hardware)
- *    - NRF24L01 MISO: Pin D12 (GPIO 47 - SPI Hardware)
- *    - NRF24L01 SCK:  Pin D13 (GPIO 48 - SPI Hardware)
- *    - NRF24L01 VCC:  Salida 3.3V regulada (Capacitor 10-100 uF obligatorio a GND)
- *
- *  TELEMETRIA VISUAL (LED RGB INTEGRADO):
- *    - Azul solido: Transmisor en espera de enlace USB o reposo (idle).
- *    - Pulso verde (30 ms): Paquete RF transmitido exitosamente.
- *    - Pulso rojo (50 ms): Falla de transmision o saturacion de FIFO de radio.
- *
- *  PROTOCOLOS Y ESPECIFICACIONES:
- *    - Puerto Serie: 115200 bps (USB CDC nativo), lectura no bloqueante.
- *    - Canal RF: 108 (2.508 GHz).
- *    - Velocidad RF: 250 kbps (RF24_250KBPS).
- *    - Potencia RF: RF24_PA_MAX.
- *    - Direccion de enlace (Pipe): 0xF0F0F0F0E1LL.
- *    - Trama binaria: 6 bytes exactos (__attribute__((packed))).
- *    - Restriccion temporal: Cero llamadas a delay(), sincronizacion con millis().
+ *  CARACTERISTICAS:
+ *    - Sin joysticks analogicos ni potenciometros: Todo el control proviene de la PC.
+ *    - Enlace Wi-Fi UDP directo hacia el SoftAP del Rover ("ROVER_NET" en 192.168.4.1:4210).
+ *    - Streaming continuo a 20 Hz (cada 50 ms) para alimentar el watchdog failsafe del Rover.
+ *    - Disparo inmediato de paquete ante nuevas consignas en puerto serie (baja latencia).
+ *    - Reenvio transparente por UDP de comandos ASCII directos (calibracion y test).
+ *    - Telemetria visual no bloqueante con LED RGB integrado (GPIO 46, 0, 45, anodo comun).
+ *    - Reconexion Wi-Fi automatica no bloqueante ante perdidas transitorias de senal.
+ *    - Handshake activo: "IDENT" -> "ID:NANO_ESP32:TX:v2.2"
+ *    - Trama binaria estricta de 8 bytes empaquetados (__attribute__((packed))).
  * =====================================================================================
  */
 
 #include <Arduino.h>
-#include <SPI.h>
-#include <RF24.h>
-#include <nRF24L01.h>
+#include <WiFi.h>
+#include <WiFiUdp.h>
 #include <stdint.h>
 #include <string.h>
 #include "PaqueteControl.h"
 
 // ==========================================
-// CONFIGURACION DE PINES DE HARDWARE
+// CONFIGURACION DE RED WI-FI Y UDP
 // ==========================================
-#if defined(ARDUINO_NANO_ESP32) || defined(ARDUINO_ARCH_ESP32)
-  #if defined(D9) && defined(D10) && defined(D11) && defined(D12) && defined(D13)
-    #define PIN_RF_CE    D9
-    #define PIN_RF_CSN   D10
-    #define PIN_SPI_MOSI D11
-    #define PIN_SPI_MISO D12
-    #define PIN_SPI_SCK  D13
-  #else
-    #define PIN_RF_CE    18
-    #define PIN_RF_CSN   21
-    #define PIN_SPI_MOSI 38
-    #define PIN_SPI_MISO 47
-    #define PIN_SPI_SCK  48
-  #endif
-#else
-  #define PIN_RF_CE   9
-  #define PIN_RF_CSN  10
-  #define PIN_SPI_MOSI 11
-  #define PIN_SPI_MISO 12
-  #define PIN_SPI_SCK  13
-#endif
+const char* TARGET_SSID = "ROVER_NET";
+const char* TARGET_PASS = "rover1234";
+const IPAddress IP_ROVER(192, 168, 4, 1);
+const unsigned int PUERTO_UDP = 4210;
 
-// LED RGB integrado de Arduino Nano ESP32 (ESP32-S3)
+WiFiUDP udp;
+
+// ==========================================
+// ASIGNACION DE LED RGB INTEGRADO
+// ==========================================
+// Pines del LED RGB integrado en Arduino Nano ESP32 (ESP32-S3)
 #if defined(LED_RED) && defined(LED_GREEN) && defined(LED_BLUE)
   #define PIN_LED_RED   LED_RED
   #define PIN_LED_GREEN LED_GREEN
@@ -81,17 +58,17 @@
 // ESTRUCTURA BINARIA ESTRICTA (8 BYTES)
 // Definida en PaqueteControl.h
 // ==========================================
-static_assert(sizeof(PaqueteControl) == 8, "El tamano de la estructura PaqueteControl debe ser exactamente 8 bytes");
+static_assert(sizeof(PaqueteControl) == 8, "PaqueteControl debe tener exactamente 8 bytes");
 
-// ==========================================
-// CONFIGURACION DE RADIOFRECUENCIA NRF24L01
-// ==========================================
-RF24 radio(PIN_RF_CE, PIN_RF_CSN);
-const byte DIRECCION_RF[6] = "ROVER";
+// Estado actual de consignas cinematicas
+PaqueteControl datosControl = {0, 0, 90, 90, 90, 90};
 
-bool radioInicializada = false;
-unsigned long ultimoIntentoRadio = 0;
-const unsigned long INTERVALO_REINTENTO_RADIO_MS = 3000;
+// Temporizadores no bloqueantes
+unsigned long ultimoEnvioMs = 0;
+const unsigned long INTERVALO_ENVIO_MS = 50; // 20 Hz continuo
+
+unsigned long ultimoIntentoWifiMs = 0;
+const unsigned long INTERVALO_RECONEXION_WIFI_MS = 3000;
 
 // ==========================================
 // CONTROL VISUAL NO BLOQUEANTE (LED RGB)
@@ -115,37 +92,48 @@ void dispararPulsoLed(bool r, bool g, bool b, unsigned long duracionMs) {
 
 void actualizarLed() {
   if (pulsoLedActivo && (millis() - tiempoInicioPulsoLed >= duracionPulsoLed)) {
-    establecerLedRgb(false, false, true); // Retornar a azul solido (espera/idle)
     pulsoLedActivo = false;
+    if (WiFi.status() == WL_CONNECTED) {
+      establecerLedRgb(false, false, true); // Azul solido: Enlace Wi-Fi activo / reposo
+    } else {
+      establecerLedRgb(true, false, false); // Rojo solido: Desconectado de Wi-Fi
+    }
   }
 }
 
 // ==========================================
-// GESTION DE RADIOFRECUENCIA
+// TRANSMISION INALAMBRICA WI-FI UDP
 // ==========================================
-void configurarRadio() {
-  radio.setPayloadSize(sizeof(PaqueteControl)); // 8 bytes exactos
-  radio.setPALevel(RF24_PA_MAX);                // Maxima potencia de emision
-  radio.setDataRate(RF24_250KBPS);              // 250 kbps (Maxima penetracion y sensibilidad)
-  radio.setChannel(108);                        // Canal 108 (2.508 GHz, fuera del rango Wi-Fi)
-  radio.setAutoAck(false);                      // Modo streaming continuo de baja latencia
-  radio.openWritingPipe(DIRECCION_RF);
-  radio.stopListening();                        // Modo transmision activo
-}
-
-bool enviarPaqueteRF(const PaqueteControl& paquete) {
-  if (!radioInicializada) {
-    dispararPulsoLed(true, false, false, 50); // Pulso rojo de 50 ms por falla de radio
+bool enviarPaqueteUdp() {
+  if (WiFi.status() != WL_CONNECTED) {
+    dispararPulsoLed(true, false, false, 50); // Pulso rojo por falta de enlace
     return false;
   }
 
-  bool ok = radio.write(&paquete, sizeof(paquete));
+  udp.beginPacket(IP_ROVER, PUERTO_UDP);
+  udp.write((const uint8_t*)&datosControl, sizeof(datosControl));
+  bool ok = (udp.endPacket() == 1);
+
   if (ok) {
-    dispararPulsoLed(false, true, false, 30); // Pulso verde de 30 ms por transmision exitosa
+    dispararPulsoLed(false, true, false, 30); // Pulso verde por envio exitoso
   } else {
-    dispararPulsoLed(true, false, false, 50); // Pulso rojo de 50 ms por error en bus RF
+    dispararPulsoLed(true, false, false, 50); // Pulso rojo por error de socket
   }
   return ok;
+}
+
+void reenviarComandoTextoUdp(const char* texto) {
+  if (WiFi.status() == WL_CONNECTED) {
+    udp.beginPacket(IP_ROVER, PUERTO_UDP);
+    udp.write((const uint8_t*)texto, strlen(texto));
+    udp.endPacket();
+    Serial.print(F("[TX NANO FWD] "));
+    Serial.println(texto);
+    dispararPulsoLed(false, true, true, 40); // Cian (Verde+Azul) por comando ASCII
+  } else {
+    Serial.println(F("[TX NANO] Error: Wi-Fi desconectado, comando no transmitido."));
+    dispararPulsoLed(true, false, false, 60);
+  }
 }
 
 // ==========================================
@@ -168,9 +156,9 @@ void procesarComando(char* cmdStr) {
 
   if (len == 0) return;
 
-  // Handshake de autodeteccion de hardware (Matriz de Perfiles)
+  // Handshake de identificacion activa para matriz de perfiles
   if (strcasecmp(cmdStr, "IDENT") == 0) {
-    Serial.println(F("ID:NANO_ESP32:TX:v2.1"));
+    Serial.println(F("ID:NANO_ESP32:TX:v2.2"));
     return;
   }
 
@@ -180,22 +168,28 @@ void procesarComando(char* cmdStr) {
     return;
   }
 
+  // Consulta de estado de enlace
+  if (strcasecmp(cmdStr, "STATUS") == 0) {
+    Serial.print(F("STATUS:WIFI="));
+    Serial.println(WiFi.status() == WL_CONNECTED ? F("CONNECTED") : F("DISCONNECTED"));
+    return;
+  }
+
   // Parada de emergencia directa
   if (strcasecmp(cmdStr, "STOP") == 0 || strcasecmp(cmdStr, "PARAR") == 0) {
-    PaqueteControl paquete;
-    paquete.traccion_izq = 0;
-    paquete.traccion_der = 0;
-    paquete.angulo_s1 = 90;
-    paquete.angulo_s2 = 90;
-    paquete.angulo_s3 = 90;
-    paquete.angulo_s4 = 90;
-    enviarPaqueteRF(paquete);
+    datosControl.traccion_izq = 0;
+    datosControl.traccion_der = 0;
+    datosControl.angulo_s1 = 90;
+    datosControl.angulo_s2 = 90;
+    datosControl.angulo_s3 = 90;
+    datosControl.angulo_s4 = 90;
+    enviarPaqueteUdp();
     Serial.println(F("STATUS:STOP"));
     Serial.println(F("TLM_TX:0,0,90,90,90,90"));
     return;
   }
 
-  // Segmentacion de tramas delimitadas por coma (CSV)
+  // Segmentacion de consignas delimitadas por coma (CSV)
   char copia[128];
   strncpy(copia, cmdStr, sizeof(copia) - 1);
   copia[sizeof(copia) - 1] = '\0';
@@ -212,7 +206,11 @@ void procesarComando(char* cmdStr) {
     tok = strtok_r(NULL, ",", &saveptr);
   }
 
-  if (numTokens < 5) return;
+  // Si no es una trama CSV de al menos 5 campos, se reenvia como texto directo al Rover
+  if (numTokens < 5) {
+    reenviarComandoTextoUdp(cmdStr);
+    return;
+  }
 
   char* comando = tokens[0];
   int v1 = atoi(tokens[1]);
@@ -222,46 +220,47 @@ void procesarComando(char* cmdStr) {
   int v5 = (numTokens >= 6) ? atoi(tokens[5]) : v3;
   int v6 = (numTokens >= 7) ? atoi(tokens[6]) : v4;
 
-  PaqueteControl paquete;
-  paquete.angulo_s1 = (uint8_t)constrain(v3, 10, 170);
-  paquete.angulo_s2 = (uint8_t)constrain(v4, 10, 170);
-  paquete.angulo_s3 = (uint8_t)constrain(v5, 10, 170);
-  paquete.angulo_s4 = (uint8_t)constrain(v6, 10, 170);
+  // Actualizar servomotores con restriccion estricta [10 deg, 170 deg]
+  datosControl.angulo_s1 = (uint8_t)constrain(v3, 10, 170);
+  datosControl.angulo_s2 = (uint8_t)constrain(v4, 10, 170);
+  datosControl.angulo_s3 = (uint8_t)constrain(v5, 10, 170);
+  datosControl.angulo_s4 = (uint8_t)constrain(v6, 10, 170);
 
-  // Comando oficial estandarizado: CMD,izq,der,s1,s2,s3,s4
+  // Comando oficial HMI: CMD,izq,der,s1,s2,s3,s4
   if (strcasecmp(comando, "CMD") == 0) {
-    paquete.traccion_izq = (int16_t)constrain(v1, -255, 255);
-    paquete.traccion_der = (int16_t)constrain(v2, -255, 255);
+    datosControl.traccion_izq = (int16_t)constrain(v1, -255, 255);
+    datosControl.traccion_der = (int16_t)constrain(v2, -255, 255);
   } else if (strcasecmp(comando, "W") == 0) {
-    paquete.traccion_izq = (int16_t)constrain(v1, -255, 255);
-    paquete.traccion_der = (int16_t)constrain(v2, -255, 255);
+    datosControl.traccion_izq = (int16_t)constrain(v1, -255, 255);
+    datosControl.traccion_der = (int16_t)constrain(v2, -255, 255);
   } else if (strcasecmp(comando, "S") == 0) {
-    paquete.traccion_izq = (int16_t)-constrain(v1, -255, 255);
-    paquete.traccion_der = (int16_t)-constrain(v2, -255, 255);
+    datosControl.traccion_izq = (int16_t)-constrain(v1, -255, 255);
+    datosControl.traccion_der = (int16_t)-constrain(v2, -255, 255);
   } else if (strcasecmp(comando, "PIVOT_IZQ") == 0) {
-    paquete.traccion_izq = (int16_t)-constrain(v1, -255, 255);
-    paquete.traccion_der = (int16_t)constrain(v2, -255, 255);
+    datosControl.traccion_izq = (int16_t)-constrain(v1, -255, 255);
+    datosControl.traccion_der = (int16_t)constrain(v2, -255, 255);
   } else if (strcasecmp(comando, "PIVOT_DER") == 0) {
-    paquete.traccion_izq = (int16_t)constrain(v1, -255, 255);
-    paquete.traccion_der = (int16_t)-constrain(v2, -255, 255);
+    datosControl.traccion_izq = (int16_t)constrain(v1, -255, 255);
+    datosControl.traccion_der = (int16_t)-constrain(v2, -255, 255);
   } else if (strcasecmp(comando, "A") == 0 || strcasecmp(comando, "D") == 0 || strcasecmp(comando, "CRAB") == 0) {
-    paquete.traccion_izq = (int16_t)constrain(v1, -255, 255);
-    paquete.traccion_der = (int16_t)constrain(v2, -255, 255);
+    datosControl.traccion_izq = (int16_t)constrain(v1, -255, 255);
+    datosControl.traccion_der = (int16_t)constrain(v2, -255, 255);
   } else {
-    paquete.traccion_izq = 0;
-    paquete.traccion_der = 0;
+    datosControl.traccion_izq = 0;
+    datosControl.traccion_der = 0;
   }
 
-  bool ok = enviarPaqueteRF(paquete);
+  // Disparo inmediato para minima latencia
+  bool ok = enviarPaqueteUdp();
   if (ok) {
     Serial.println(F("STATUS:OK_4SERVO"));
     Serial.print(F("TLM_TX:"));
-    Serial.print(paquete.traccion_izq); Serial.print(F(","));
-    Serial.print(paquete.traccion_der); Serial.print(F(","));
-    Serial.print(paquete.angulo_s1); Serial.print(F(","));
-    Serial.print(paquete.angulo_s2); Serial.print(F(","));
-    Serial.print(paquete.angulo_s3); Serial.print(F(","));
-    Serial.println(paquete.angulo_s4);
+    Serial.print(datosControl.traccion_izq); Serial.print(F(","));
+    Serial.print(datosControl.traccion_der); Serial.print(F(","));
+    Serial.print(datosControl.angulo_s1); Serial.print(F(","));
+    Serial.print(datosControl.angulo_s2); Serial.print(F(","));
+    Serial.print(datosControl.angulo_s3); Serial.print(F(","));
+    Serial.println(datosControl.angulo_s4);
   } else {
     Serial.println(F("STATUS:TX_ERROR"));
   }
@@ -295,41 +294,50 @@ void setup() {
   pinMode(PIN_LED_RED, OUTPUT);
   pinMode(PIN_LED_GREEN, OUTPUT);
   pinMode(PIN_LED_BLUE, OUTPUT);
-  establecerLedRgb(false, false, true); // Azul solido: Transmisor listo / En espera
+  establecerLedRgb(false, false, true); // Azul inicial
 
-  // Inicializacion de bus SPI de hardware
-  #if defined(ARDUINO_ARCH_ESP32)
-    SPI.begin(PIN_SPI_SCK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_RF_CSN);
-  #else
-    SPI.begin();
-  #endif
+  // Inicializacion Wi-Fi en modo Estacion (STA)
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(TARGET_SSID, TARGET_PASS);
+  udp.begin(0); // Puerto local asignado dinamicamente
 
-  // Inicializacion del modulo de radiofrecuencia NRF24L01+
-  radioInicializada = radio.begin();
-  if (radioInicializada) {
-    configurarRadio();
-    Serial.println(F("SYS:ARDUINO_NANO_ESP32_TRANSMISOR_LISTO"));
-  } else {
-    Serial.println(F("ERROR:NRF24L01_NO_DETECTADO"));
-    dispararPulsoLed(true, false, false, 1000); // Advertencia visual en rojo
-  }
+  Serial.println(F("SYS:ARDUINO_NANO_ESP32_WIFI_TX_INICIADO"));
 }
 
 void loop() {
-  // Lectura no bloqueante del buffer serie
+  // 1. Lectura no bloqueante del buffer serie USB
   leerSerialNoBloqueante();
 
-  // Actualizacion no bloqueante del temporizador de estado LED
+  // 2. Gestion de estado y reconexion no bloqueante de Wi-Fi
+  static bool wifiConectadoPrevio = false;
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!wifiConectadoPrevio) {
+      wifiConectadoPrevio = true;
+      establecerLedRgb(false, false, true); // Azul solido: Listo
+      Serial.print(F("SYS:WIFI_CONECTADO_IP="));
+      Serial.println(WiFi.localIP());
+    }
+  } else {
+    if (wifiConectadoPrevio) {
+      wifiConectadoPrevio = false;
+      establecerLedRgb(true, false, false); // Rojo solido: Desconectado
+      Serial.println(F("WARN:WIFI_DESCONECTADO"));
+    }
+
+    // Intento de reconexion periodica cada 3000 ms sin bloquear loop()
+    if (millis() - ultimoIntentoWifiMs >= INTERVALO_RECONEXION_WIFI_MS) {
+      ultimoIntentoWifiMs = millis();
+      WiFi.disconnect();
+      WiFi.begin(TARGET_SSID, TARGET_PASS);
+    }
+  }
+
+  // 3. Actualizacion no bloqueante del temporizador de pulsos del LED
   actualizarLed();
 
-  // Rutina no bloqueante de recuperacion si la radio no estaba conectada al arrancar
-  if (!radioInicializada && (millis() - ultimoIntentoRadio >= INTERVALO_REINTENTO_RADIO_MS)) {
-    ultimoIntentoRadio = millis();
-    if (radio.begin()) {
-      configurarRadio();
-      radioInicializada = true;
-      establecerLedRgb(false, false, true); // Retornar a azul solido
-      Serial.println(F("SYS:NRF24L01_RECUPERADO"));
-    }
+  // 4. Streaming periodico continuo a 20 Hz para alimentar watchdog del Rover
+  if (millis() - ultimoEnvioMs >= INTERVALO_ENVIO_MS) {
+    ultimoEnvioMs = millis();
+    enviarPaqueteUdp();
   }
 }
