@@ -27,7 +27,8 @@ class PerfilHardware:
     sketch_tx: Optional[str] = None
     sketch_rx: Optional[str] = None
     descripcion: str = ""
-
+    use_pca: bool = False  # Flag to enable PCA9685 control
+    use_pca: bool = True
     @property
     def soporta_tx(self) -> bool:
         """Indica si el perfil tiene firmware de transmision asignado."""
@@ -79,6 +80,7 @@ PERFILES_OFICIALES: list[PerfilHardware] = [
         sketch_tx="02_Debug_y_Pruebas/Firmware_Debug/Transmisor_ArduinoNano_ESP32/Transmisor_ArduinoNano_ESP32.ino",
         sketch_rx="01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32/Ejecutor_ArduinoNano_ESP32.ino",
         descripcion="Plataforma oficial estandarizada a 3.3V (ESP32-S3). Soporta transmision y recepcion.",
+	use_pca="True",
     ),
     PerfilHardware(
         id="ESP32_C3_SUPERMINI",

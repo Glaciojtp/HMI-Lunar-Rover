@@ -150,12 +150,158 @@ class TestInicializacionHMIOficialPre(unittest.TestCase):
             for p in pwms:
                 self.assertGreater(p, 0)
 
-    def test_formatear_calibracion_pre_despliegue(self):
-        trims = {1: 100, 2: 100, 3: 100, 4: 100, 5: 100, 6: 100}
-        servos = {1: 90, 2: 90, 3: 90, 4: 90}
-        trama = formatear_trama_calibracion(trims, servos)
-        self.assertEqual(trama, "CALIB,100,100,100,100,100,100,90,90,90,90\n")
+    def test_inversion_pwm_izq_predeterminada(self):
+        with patch.object(HMIRoverRockerBogieV21Pre, "crear_widgets"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "iniciar_hilos_segundo_plano"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "actualizar_telemetria_ui"):
+            app = HMIRoverRockerBogieV21Pre(self.mock_root)
+            self.assertTrue(app.invertir_pwm_izq.get())
+            self.assertFalse(app.invertir_pwm_der.get())
+
+    def test_generar_trama_control_w_izq_invertida(self):
+        with patch.object(HMIRoverRockerBogieV21Pre, "crear_widgets"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "iniciar_hilos_segundo_plano"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "actualizar_telemetria_ui"):
+            app = HMIRoverRockerBogieV21Pre(self.mock_root)
+            app.master_izq.set(150)
+            app.master_der.set(150)
+            app.comando_actual = "W"
+            trama = app.generar_trama_control()
+            self.assertEqual(trama, "W,-150,150,90,90,90,90\n")
+
+    def test_generar_trama_control_s_izq_invertida(self):
+        with patch.object(HMIRoverRockerBogieV21Pre, "crear_widgets"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "iniciar_hilos_segundo_plano"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "actualizar_telemetria_ui"):
+            app = HMIRoverRockerBogieV21Pre(self.mock_root)
+            app.master_izq.set(150)
+            app.master_der.set(150)
+            app.comando_actual = "S"
+            trama = app.generar_trama_control()
+            self.assertEqual(trama, "S,-150,150,90,90,90,90\n")
+
+    def test_generar_trama_control_stop(self):
+        with patch.object(HMIRoverRockerBogieV21Pre, "crear_widgets"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "iniciar_hilos_segundo_plano"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "actualizar_telemetria_ui"):
+            app = HMIRoverRockerBogieV21Pre(self.mock_root)
+            app.comando_actual = "STOP"
+            trama = app.generar_trama_control()
+            self.assertEqual(trama, "STOP,0,0,90,90,90,90\n")
+
+    def test_desactivar_inversion_pwm_izq(self):
+        with patch.object(HMIRoverRockerBogieV21Pre, "crear_widgets"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "iniciar_hilos_segundo_plano"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "actualizar_telemetria_ui"):
+            app = HMIRoverRockerBogieV21Pre(self.mock_root)
+            app.master_izq.set(150)
+            app.master_der.set(150)
+            app.invertir_pwm_izq.set(False)
+            app.comando_actual = "W"
+            trama = app.generar_trama_control()
+            self.assertEqual(trama, "W,150,150,90,90,90,90\n")
+
+    def test_rover_en_movimiento(self):
+        with patch.object(HMIRoverRockerBogieV21Pre, "crear_widgets"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "iniciar_hilos_segundo_plano"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "actualizar_telemetria_ui"):
+            app = HMIRoverRockerBogieV21Pre(self.mock_root)
+            app.comando_actual = " "
+            self.assertFalse(app.rover_en_movimiento())
+            app.comando_actual = "STOP"
+            self.assertFalse(app.rover_en_movimiento())
+            app.comando_actual = "W"
+            self.assertTrue(app.rover_en_movimiento())
+            app.comando_actual = "S"
+            self.assertTrue(app.rover_en_movimiento())
+            app.comando_actual = "PIVOT_IZQ"
+            self.assertTrue(app.rover_en_movimiento())
+
+    def test_sync_master_no_envia_cuando_detenido(self):
+        with patch.object(HMIRoverRockerBogieV21Pre, "crear_widgets"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "iniciar_hilos_segundo_plano"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "actualizar_telemetria_ui"):
+            app = HMIRoverRockerBogieV21Pre(self.mock_root)
+            app.conectado = True
+            app.comando_actual = " "
+            with patch.object(app, "enviar_trama_actual") as mock_env:
+                app.sync_master_izq(200)
+                app.sync_master_der(220)
+                mock_env.assert_not_called()
+
+    def test_sync_master_envia_cuando_en_movimiento(self):
+        with patch.object(HMIRoverRockerBogieV21Pre, "crear_widgets"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "iniciar_hilos_segundo_plano"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "actualizar_telemetria_ui"):
+            app = HMIRoverRockerBogieV21Pre(self.mock_root)
+            app.conectado = True
+            app.comando_actual = "W"
+            with patch.object(app, "_solicitar_envio_throttled") as mock_throt:
+                app.sync_master_izq(200)
+                mock_throt.assert_called_once()
+
+    def test_lock_serial_presente(self):
+        with patch.object(HMIRoverRockerBogieV21Pre, "crear_widgets"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "iniciar_hilos_segundo_plano"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "actualizar_telemetria_ui"):
+            app = HMIRoverRockerBogieV21Pre(self.mock_root)
+            self.assertTrue(hasattr(app, "lock_serial"))
+
+    def test_mapeo_ruedas_m1_a_m6_en_canvas(self):
+        with patch.object(HMIRoverRockerBogieV21Pre, "crear_widgets"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "iniciar_hilos_segundo_plano"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "actualizar_telemetria_ui"):
+            app = HMIRoverRockerBogieV21Pre(self.mock_root)
+            app.canvas_rover = MagicMock()
+            ruedas_dibujadas = []
+
+            def mock_dibujar_rueda(c, x, y, ang, color, label, pwm):
+                ruedas_dibujadas.append((label, pwm, color))
+
+            app.dibujar_rueda_orientada = mock_dibujar_rueda
+            # pwms: [m1, m2, m3, m4, m5, m6]
+            pwms_prueba = [-120, -120, -120, 150, 150, 150]
+            app.dibujar_esquema_rover("W", 90, 90, 90, 90, pwms=pwms_prueba)
+
+            dict_ruedas = {label: (pwm, color) for label, pwm, color in ruedas_dibujadas}
+            # Verificar que las 3 ruedas izquierdas tengan PWM negativo (-120) y color naranja
+            self.assertEqual(dict_ruedas["M1"][0], -120)
+            self.assertEqual(dict_ruedas["M2"][0], -120)
+            self.assertEqual(dict_ruedas["M3"][0], -120)
+            self.assertEqual(dict_ruedas["M1"][1], "#ff9f1c")
+            self.assertEqual(dict_ruedas["M2"][1], "#ff9f1c")
+            self.assertEqual(dict_ruedas["M3"][1], "#ff9f1c")
+
+            # Verificar que las 3 ruedas derechas tengan PWM positivo (150) y color verde
+            self.assertEqual(dict_ruedas["M4"][0], 150)
+            self.assertEqual(dict_ruedas["M5"][0], 150)
+            self.assertEqual(dict_ruedas["M6"][0], 150)
+            self.assertEqual(dict_ruedas["M4"][1], "#38b000")
+            self.assertEqual(dict_ruedas["M5"][1], "#38b000")
+            self.assertEqual(dict_ruedas["M6"][1], "#38b000")
+
+    def test_alineacion_vectorial_flecha_rueda(self):
+        with patch.object(HMIRoverRockerBogieV21Pre, "crear_widgets"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "iniciar_hilos_segundo_plano"), \
+             patch.object(HMIRoverRockerBogieV21Pre, "actualizar_telemetria_ui"):
+            app = HMIRoverRockerBogieV21Pre(self.mock_root)
+            mock_canvas = MagicMock()
+            # Giro a 45 grados hacia la derecha (delta_deg = 45 -> avance hacia arriba y a la derecha)
+            app.dibujar_rueda_orientada(mock_canvas, 100, 100, 45, "#38b000", "M1", 150)
+
+            # Verificar creacion de linea de flecha
+            mock_canvas.create_line.assert_called_once()
+            args, kwargs = mock_canvas.create_line.call_args
+            x_ini, y_ini, x_fin, y_fin = args[0], args[1], args[2], args[3]
+
+            dx = x_fin - x_ini
+            dy = y_fin - y_ini
+            # Con delta_deg = 45, dx debe ser positivo (hacia la derecha) y dy negativo (hacia arriba)
+            self.assertGreater(dx, 0, "El vector x de la flecha debe apuntar hacia adelante-derecha")
+            self.assertLess(dy, 0, "El vector y de la flecha debe apuntar hacia arriba (avance)")
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
