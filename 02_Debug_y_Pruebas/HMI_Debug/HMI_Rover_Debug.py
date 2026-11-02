@@ -24,6 +24,7 @@ import os
 import time
 import math
 import threading
+import socket
 from pathlib import Path
 
 # Asegurar importacion de modulos locales de HMI_Debug
@@ -110,11 +111,32 @@ class HMIRoverDebug:
         self.ultima_latencia_ms = 0.0
 
         # Opciones visuales y de consola
-        self.mostrar_hex = tk.BooleanVar(value=True) if tk else None
+        self.mostrar_hex = tk.BooleanVar(value=False) if tk else None
         self.mostrar_raw_esp = tk.BooleanVar(value=True) if tk else None
         self.mostrar_raw_mkr = tk.BooleanVar(value=True) if tk else None
+        self.filtrar_repetidos = tk.BooleanVar(value=True) if tk else None
         self.auto_scroll = tk.BooleanVar(value=True) if tk else None
-        self.tx_continuo = tk.BooleanVar(value=True) if tk else None
+        self.tx_continuo = tk.BooleanVar(value=False) if tk else None
+        self.modo_transmision_wifi = tk.BooleanVar(value=False) if tk else None
+        self.motores_bloqueados = False
+        self.invertir_dir_izq = tk.BooleanVar(value=True) if tk else None
+        self.invertir_dir_der = tk.BooleanVar(value=True) if tk else None
+        self.invertir_logica_pwm = tk.BooleanVar(value=True) if tk else None
+        self.sock_udp = None
+        self.ip_rover_wifi = "192.168.4.1"
+        self.puerto_rover_wifi = 4210
+        self._ultima_linea_tx = None
+        self._ultima_linea_rx_tlm = None
+        self._ultima_linea_rx_raw = None
+        self._ultima_trama_tx_log = None
+        self._ultimo_log_master = 0.0
+
+        # Sincronizacion de hilos y control de fallos en puertos serie
+        self.lock_tx = threading.Lock()
+        self.lock_rx = threading.Lock()
+        self._tx_consecutive_errors = 0
+        self._rx_consecutive_errors = 0
+        self._ultimo_envio_slider = 0.0
 
         # Estado dinamico de control (TX)
         self.comando_actual = "STOP"
@@ -269,6 +291,9 @@ class HMIRoverDebug:
         btn_refrescar = tk.Button(row_conn, text="Refrescar Puertos", bg="#334155", fg="#ffffff", font=("Segoe UI", 8, "bold"),
                                   command=self.actualizar_lista_puertos, relief="flat", padx=5)
         btn_refrescar.pack(side="left", padx=3)
+
+        tk.Checkbutton(row_conn, text="Wi-Fi Directo (UDP)", variable=self.modo_transmision_wifi,
+                       bg="#151824", fg="#38bdf8", selectcolor="#0c0e17", font=("Segoe UI", 8, "bold")).pack(side="left", padx=4)
 
         # Insignia de Validacion Cruzada TX <-> RX a la derecha
         self.badge_validacion = tk.Label(row_conn, text="[VALIDACION: EN ESPERA]", width=28, bg="#2a2e3f", fg="#94a3b8",
@@ -545,6 +570,16 @@ class HMIRoverDebug:
                                font=("Segoe UI", 8, "bold"), relief="flat", takefocus=0)
         self.btn_s.grid(row=2, column=1, padx=2, pady=2)
 
+        # Enlace de mouse (click / mantener presionado) en botones WASD
+        self.btn_w.bind("<ButtonPress-1>", lambda e: self.btn_mouse_press('w'))
+        self.btn_w.bind("<ButtonRelease-1>", lambda e: self.btn_mouse_release('w'))
+        self.btn_s.bind("<ButtonPress-1>", lambda e: self.btn_mouse_press('s'))
+        self.btn_s.bind("<ButtonRelease-1>", lambda e: self.btn_mouse_release('s'))
+        self.btn_a.bind("<ButtonPress-1>", lambda e: self.btn_mouse_press('a'))
+        self.btn_a.bind("<ButtonRelease-1>", lambda e: self.btn_mouse_release('a'))
+        self.btn_d.bind("<ButtonPress-1>", lambda e: self.btn_mouse_press('d'))
+        self.btn_d.bind("<ButtonRelease-1>", lambda e: self.btn_mouse_release('d'))
+
         # Metricas Resumen
         card_metricas = ttk.Frame(col_der, style="Card.TFrame", padding=6)
         card_metricas.pack(fill="x", pady=(0, 4))
@@ -575,6 +610,104 @@ class HMIRoverDebug:
         self.lbl_met_mismatches = ttk.Label(grid_met, text="0", style="ValueWarn.TLabel", width=8)
         self.lbl_met_mismatches.grid(row=1, column=5, sticky="w", padx=4)
 
+        # --- PANEL DE AISLAMIENTO & TEST INDIVIDUAL DE ACTUADORES (RX) ---
+        card_diag = ttk.Frame(col_der, style="Card.TFrame", padding=6)
+        card_diag.pack(fill="x", pady=(4, 0))
+
+        frm_tit_d = ttk.Frame(card_diag, style="Card.TFrame")
+        frm_tit_d.pack(fill="x", pady=(0, 2))
+        ttk.Label(frm_tit_d, text="AISLAMIENTO Y TEST INDIVIDUAL (HARDWARE DEBUG)", style="Header.TLabel").pack(side="left")
+
+        # Fila 1: Bloqueo de seguridad de traccion y pruebas de motor
+        frm_d_m = ttk.Frame(card_diag, style="Card.TFrame")
+        frm_d_m.pack(fill="x", pady=2)
+
+        self.btn_bloqueo_motores = tk.Button(frm_d_m, text="BLOQUEAR MOTORES (OFF)", bg="#b91c1c", fg="#ffffff",
+                                             font=("Segoe UI", 8, "bold"), relief="flat", padx=6, pady=2,
+                                             command=self.toggle_bloqueo_motores)
+        self.btn_bloqueo_motores.pack(side="left", padx=(0, 4))
+
+        tk.Button(frm_d_m, text="Test M. Izq (75)", bg="#1e293b", fg="#38bdf8",
+                  font=("Segoe UI", 7, "bold"), relief="flat", padx=5, pady=2,
+                  command=self.test_motor_izq_solo).pack(side="left", padx=2)
+
+        tk.Button(frm_d_m, text="Test M. Der (75)", bg="#1e293b", fg="#38bdf8",
+                  font=("Segoe UI", 7, "bold"), relief="flat", padx=5, pady=2,
+                  command=self.test_motor_der_solo).pack(side="left", padx=2)
+
+        tk.Button(frm_d_m, text="PARAR RX", bg="#e63946", fg="#ffffff",
+                  font=("Segoe UI", 7, "bold"), relief="flat", padx=6, pady=2,
+                  command=self.parar_rx_directo).pack(side="right", padx=2)
+
+        # Fila 1b: Diagnostico unitario de pines de hardware (D2, D5, D3, D4)
+        frm_d_pins = ttk.Frame(card_diag, style="Card.TFrame")
+        frm_d_pins.pack(fill="x", pady=2)
+
+        ttk.Label(frm_d_pins, text="Pines Puente H:", style="SubHeader.TLabel").pack(side="left", padx=(0, 4))
+
+        tk.Button(frm_d_pins, text="D2 (Izq Av)", bg="#1e293b", fg="#34d399",
+                  font=("Segoe UI", 7, "bold"), relief="flat", padx=4, pady=1,
+                  command=lambda: self.test_pin_individual("D2")).pack(side="left", padx=1)
+        tk.Button(frm_d_pins, text="D5 (Izq Rev)", bg="#1e293b", fg="#34d399",
+                  font=("Segoe UI", 7, "bold"), relief="flat", padx=4, pady=1,
+                  command=lambda: self.test_pin_individual("D5")).pack(side="left", padx=1)
+        tk.Button(frm_d_pins, text="D3 (Der Av)", bg="#1e293b", fg="#38bdf8",
+                  font=("Segoe UI", 7, "bold"), relief="flat", padx=4, pady=1,
+                  command=lambda: self.test_pin_individual("D3")).pack(side="left", padx=1)
+        tk.Button(frm_d_pins, text="D4 (Der Rev)", bg="#1e293b", fg="#38bdf8",
+                  font=("Segoe UI", 7, "bold"), relief="flat", padx=4, pady=1,
+                  command=lambda: self.test_pin_individual("D4")).pack(side="left", padx=1)
+
+        # Fila 1c: Opciones de Inversion de PWM / Sentido de Traccion
+        frm_d_inv = ttk.Frame(card_diag, style="Card.TFrame")
+        frm_d_inv.pack(fill="x", pady=2)
+
+        ttk.Label(frm_d_inv, text="Inversion PWM:", style="SubHeader.TLabel").pack(side="left", padx=(0, 4))
+
+        tk.Checkbutton(frm_d_inv, text="Inv. Dir Izq", variable=self.invertir_dir_izq,
+                       bg="#151824", fg="#38bdf8", selectcolor="#0c0e17", font=("Segoe UI", 7, "bold")).pack(side="left", padx=2)
+
+        tk.Checkbutton(frm_d_inv, text="Inv. Dir Der", variable=self.invertir_dir_der,
+                       bg="#151824", fg="#38bdf8", selectcolor="#0c0e17", font=("Segoe UI", 7, "bold")).pack(side="left", padx=2)
+
+        tk.Checkbutton(frm_d_inv, text="Inv. Logica (255 - PWM)", variable=self.invertir_logica_pwm,
+                       bg="#151824", fg="#fca5a5", selectcolor="#0c0e17", font=("Segoe UI", 7, "bold")).pack(side="left", padx=4)
+
+        tk.Button(frm_d_inv, text="Enviar Inv a RX", bg="#334155", fg="#e2e8f0",
+                  font=("Segoe UI", 7, "bold"), relief="flat", padx=4, pady=1,
+                  command=self.sincronizar_inversion_rx).pack(side="right", padx=2)
+
+        # Fila 2: Pruebas individuales de servomotores
+        frm_d_s = ttk.Frame(card_diag, style="Card.TFrame")
+        frm_d_s.pack(fill="x", pady=2)
+
+        ttk.Label(frm_d_s, text="Servos RX:", style="SubHeader.TLabel").pack(side="left", padx=(0, 4))
+
+        for idx, (nombre, color) in enumerate([("S1", "#00f5d4"), ("S2", "#38bdf8"), ("S3", "#a78bfa"), ("S4", "#f472b6")], start=1):
+            tk.Button(frm_d_s, text=f"{nombre}: 45 deg", bg="#1e293b", fg=color,
+                      font=("Segoe UI", 7, "bold"), relief="flat", padx=3, pady=1,
+                      command=lambda i=idx: self.test_servo_individual(i, 45)).pack(side="left", padx=1)
+            tk.Button(frm_d_s, text=f"{nombre}: 135 deg", bg="#1e293b", fg=color,
+                      font=("Segoe UI", 7, "bold"), relief="flat", padx=3, pady=1,
+                      command=lambda i=idx: self.test_servo_individual(i, 135)).pack(side="left", padx=1)
+
+        tk.Button(frm_d_s, text="90 deg (Todos)", bg="#334155", fg="#ffffff",
+                  font=("Segoe UI", 7, "bold"), relief="flat", padx=4, pady=1,
+                  command=self.test_servos_centrar).pack(side="right", padx=1)
+
+        # Fila 3: Entrada de comando manual a RX (COM21)
+        frm_d_cmd = ttk.Frame(card_diag, style="Card.TFrame")
+        frm_d_cmd.pack(fill="x", pady=2)
+
+        ttk.Label(frm_d_cmd, text="Comando a RX:", style="SubHeader.TLabel").pack(side="left", padx=(0, 4))
+        self.entry_cmd_manual_rx = ttk.Entry(frm_d_cmd, width=28)
+        self.entry_cmd_manual_rx.pack(side="left", fill="x", expand=True, padx=2)
+        self.entry_cmd_manual_rx.bind("<Return>", self.enviar_comando_manual_rx)
+
+        tk.Button(frm_d_cmd, text="Enviar a RX", bg="#854d0e", fg="#ffffff",
+                  font=("Segoe UI", 7, "bold"), relief="flat", padx=6, pady=1,
+                  command=self.enviar_comando_manual_rx).pack(side="right", padx=2)
+
         # =========================================================================
         # 3. TERMINAL INFERIOR MULTI-CANAL DE DEPURACION Y VALIDACION (CARD_CONSOLA)
         # =========================================================================
@@ -586,11 +719,13 @@ class HMIRoverDebug:
         tk.Checkbutton(frm_tit_cons, text="Ver Hex TX", variable=self.mostrar_hex,
                        bg="#151824", fg="#94a3b8", selectcolor="#0c0e17", font=("Segoe UI", 8)).pack(side="left", padx=(15, 3))
         tk.Checkbutton(frm_tit_cons, text="Ver TX RAW", variable=self.mostrar_raw_esp,
-                       bg="#151824", fg="#94a3b8", selectcolor="#0c0e17", font=("Segoe UI", 8)).pack(side="left", padx=3)
+                       bg="#151824", fg="#00f5d4", selectcolor="#0c0e17", font=("Segoe UI", 8, "bold")).pack(side="left", padx=3)
         tk.Checkbutton(frm_tit_cons, text="Ver RX RAW", variable=self.mostrar_raw_mkr,
+                       bg="#151824", fg="#fbbf24", selectcolor="#0c0e17", font=("Segoe UI", 8, "bold")).pack(side="left", padx=3)
+        tk.Checkbutton(frm_tit_cons, text="Filtrar Repetidos", variable=self.filtrar_repetidos,
                        bg="#151824", fg="#94a3b8", selectcolor="#0c0e17", font=("Segoe UI", 8)).pack(side="left", padx=3)
         tk.Checkbutton(frm_tit_cons, text="TX Continuo", variable=self.tx_continuo,
-                       bg="#151824", fg="#00f5d4", selectcolor="#0c0e17", font=("Segoe UI", 8)).pack(side="left", padx=3)
+                       bg="#151824", fg="#38bdf8", selectcolor="#0c0e17", font=("Segoe UI", 8)).pack(side="left", padx=3)
         tk.Checkbutton(frm_tit_cons, text="AutoScroll", variable=self.auto_scroll,
                        bg="#151824", fg="#94a3b8", selectcolor="#0c0e17", font=("Segoe UI", 8)).pack(side="left", padx=3)
 
@@ -691,9 +826,12 @@ class HMIRoverDebug:
 
         def al_mover(val):
             self.actualizar_labels_trim()
-            if self.conectado_tx and self.comando_actual != "STOP":
-                self.enviar_trama_actual()
             self.actualizar_grafico_tx()
+            t_ahora = time.time()
+            if t_ahora - getattr(self, "_ultimo_envio_slider", 0) > 0.05:
+                self._ultimo_envio_slider = t_ahora
+                if (self.conectado_tx or self.modo_transmision_wifi.get()) and self.comando_actual != "STOP":
+                    self.enviar_trama_actual()
 
         s = tk.Scale(frm, from_=0, to=150, orient="horizontal", variable=variable,
                      bg="#151824", fg="#00f5d4", highlightthickness=0, command=al_mover)
@@ -720,9 +858,9 @@ class HMIRoverDebug:
         for i in range(1, 7):
             getattr(self, f"trim_m{i}").set(100)
         self.actualizar_labels_trim()
-        if self.conectado_tx and self.comando_actual != "STOP":
-            self.enviar_trama_actual()
         self.actualizar_grafico_tx()
+        if (self.conectado_tx or self.modo_transmision_wifi.get()) and self.comando_actual != "STOP":
+            self.enviar_trama_actual()
         self.log_consola("SYS", "Trims de los 6 motores restablecidos al 100% (Ratio 1.0x).")
 
     def calcular_pwms_tx(self):
@@ -866,12 +1004,13 @@ class HMIRoverDebug:
             return
 
         if self.conectado_tx:
-            self.conectado_tx = False
-            if self.serial_tx and self.serial_tx.is_open:
-                try:
-                    self.serial_tx.close()
-                except Exception:
-                    pass
+            with self.lock_tx:
+                self.conectado_tx = False
+                if self.serial_tx and self.serial_tx.is_open:
+                    try:
+                        self.serial_tx.close()
+                    except Exception:
+                        pass
             self.btn_conectar_tx.config(text="Conectar TX", bg="#00f5d4", fg="#0c0e17")
             self.badge_tx.config(text="[TX OFF]", bg="#2a2e3f", fg="#f87171")
             self.log_consola("SYS", "Puerto TX desconectado.")
@@ -882,17 +1021,19 @@ class HMIRoverDebug:
                     messagebox.showwarning("Atencion", "Seleccione un puerto valido para TX.")
                 return
             try:
-                self.serial_tx = serial.Serial()
-                self.serial_tx.port = p
-                self.serial_tx.baudrate = 115200
-                self.serial_tx.timeout = 0.05
-                self.serial_tx.write_timeout = 0.2
-                self.serial_tx.rts = False
-                self.serial_tx.dtr = False
-                self.serial_tx.open()
-                time.sleep(0.15)
-                self.serial_tx.dtr = True
-                self.conectado_tx = True
+                with self.lock_tx:
+                    self.serial_tx = serial.Serial()
+                    self.serial_tx.port = p
+                    self.serial_tx.baudrate = 115200
+                    self.serial_tx.timeout = 0.05
+                    self.serial_tx.write_timeout = 0.2
+                    self.serial_tx.rts = False
+                    self.serial_tx.dtr = False
+                    self.serial_tx.open()
+                    time.sleep(0.15)
+                    self.serial_tx.dtr = True
+                    self.conectado_tx = True
+                    self._tx_consecutive_errors = 0
                 self.btn_conectar_tx.config(text="Desconectar TX", bg="#e63946", fg="#ffffff")
                 self.badge_tx.config(text=f"[TX ON] {p}", bg="#064e3b", fg="#34d399")
                 self.log_consola("SYS", f"Transmisor TX conectado en {p} @ 115200 bps (DTR=ON, RTS=OFF).")
@@ -907,8 +1048,9 @@ class HMIRoverDebug:
         """Envia comando IDENT y PING al transmisor para handshake activo y confirmacion."""
         if self.conectado_tx and self.serial_tx and self.serial_tx.is_open:
             try:
-                self.serial_tx.write(b"IDENT\n")
-                self.serial_tx.flush()
+                with self.lock_tx:
+                    self.serial_tx.write(b"IDENT\n")
+                    self.serial_tx.flush()
                 self.log_consola("TX", "[DIAGNOSTICO] Enviado comando 'IDENT' a TX...")
             except Exception as e:
                 self.log_consola("WARN", f"Error enviando IDENT a TX: {e}")
@@ -923,12 +1065,13 @@ class HMIRoverDebug:
         if self.conectado_tx and self.serial_tx and self.serial_tx.is_open:
             try:
                 self.log_consola("SYS", "[RESET] Enviando pulso de reinicio por hardware a TX...")
-                self.serial_tx.dtr = False
-                self.serial_tx.rts = True
-                time.sleep(0.1)
-                self.serial_tx.rts = False
-                time.sleep(0.15)
-                self.serial_tx.dtr = True
+                with self.lock_tx:
+                    self.serial_tx.dtr = False
+                    self.serial_tx.rts = True
+                    time.sleep(0.1)
+                    self.serial_tx.rts = False
+                    time.sleep(0.15)
+                    self.serial_tx.dtr = True
                 self.log_consola("SYS", "[RESET] TX liberado. Esperando arranque...")
                 self.root.after(1000, self.ident_o_ping_tx)
             except Exception as e:
@@ -937,6 +1080,38 @@ class HMIRoverDebug:
             if messagebox:
                 messagebox.showinfo("Reset TX", "Conecte primero el puerto TX.")
 
+    def desconectar_tx_por_error(self, err_msg=""):
+        if not self.conectado_tx:
+            return
+        with self.lock_tx:
+            self.conectado_tx = False
+            if self.serial_tx:
+                try:
+                    self.serial_tx.close()
+                except Exception:
+                    pass
+        if hasattr(self, 'btn_conectar_tx'):
+            self.root.after(0, lambda: self.btn_conectar_tx.config(text="Conectar TX", bg="#00f5d4", fg="#0c0e17"))
+        if hasattr(self, 'badge_tx'):
+            self.root.after(0, lambda: self.badge_tx.config(text="[TX DESCONECTADO]", bg="#450a0a", fg="#f87171"))
+        self.root.after(0, self.log_consola, "WARN", f"[TX HARDWARE ERROR] Puerto TX desconectado tras fallos repetidos ({err_msg}). Reconecte el cable USB o presione 'Conectar TX'.")
+
+    def desconectar_rx_por_error(self, err_msg=""):
+        if not self.conectado_rx:
+            return
+        with self.lock_rx:
+            self.conectado_rx = False
+            if self.serial_rx:
+                try:
+                    self.serial_rx.close()
+                except Exception:
+                    pass
+        if hasattr(self, 'btn_conectar_rx'):
+            self.root.after(0, lambda: self.btn_conectar_rx.config(text="Conectar RX", bg="#fbbf24", fg="#0c0e17"))
+        if hasattr(self, 'badge_rx'):
+            self.root.after(0, lambda: self.badge_rx.config(text="[RX DESCONECTADO]", bg="#450a0a", fg="#f87171"))
+        self.root.after(0, self.log_consola, "WARN", f"[RX HARDWARE ERROR] Puerto RX desconectado tras fallos repetidos ({err_msg}). Reconecte el cable USB o presione 'Conectar RX'.")
+
     def toggle_conexion_rx(self):
         if not SERIAL_DISPONIBLE:
             if messagebox:
@@ -944,12 +1119,13 @@ class HMIRoverDebug:
             return
 
         if self.conectado_rx:
-            self.conectado_rx = False
-            if self.serial_rx and self.serial_rx.is_open:
-                try:
-                    self.serial_rx.close()
-                except Exception:
-                    pass
+            with self.lock_rx:
+                self.conectado_rx = False
+                if self.serial_rx and self.serial_rx.is_open:
+                    try:
+                        self.serial_rx.close()
+                    except Exception:
+                        pass
             self.btn_conectar_rx.config(text="Conectar RX", bg="#fbbf24", fg="#0c0e17")
             self.badge_rx.config(text="[RX OFF]", bg="#2a2e3f", fg="#f87171")
             self.log_consola("SYS", "Puerto RX desconectado.")
@@ -960,16 +1136,18 @@ class HMIRoverDebug:
                     messagebox.showwarning("Atencion", "Seleccione un puerto valido para RX.")
                 return
             try:
-                self.serial_rx = serial.Serial()
-                self.serial_rx.port = p
-                self.serial_rx.baudrate = 115200
-                self.serial_rx.timeout = 0.05
-                self.serial_rx.write_timeout = 0.2
-                self.serial_rx.rts = False
-                self.serial_rx.dtr = True
-                self.serial_rx.open()
-                time.sleep(0.15)
-                self.conectado_rx = True
+                with self.lock_rx:
+                    self.serial_rx = serial.Serial()
+                    self.serial_rx.port = p
+                    self.serial_rx.baudrate = 115200
+                    self.serial_rx.timeout = 0.05
+                    self.serial_rx.write_timeout = 0.2
+                    self.serial_rx.rts = False
+                    self.serial_rx.dtr = True
+                    self.serial_rx.open()
+                    time.sleep(0.15)
+                    self.conectado_rx = True
+                    self._rx_consecutive_errors = 0
                 self.btn_conectar_rx.config(text="Desconectar RX", bg="#e63946", fg="#ffffff")
                 self.badge_rx.config(text=f"[RX ON] {p}", bg="#451a03", fg="#fbbf24")
                 self.log_consola("SYS", f"Receptor RX conectado en {p} @ 115200 bps.")
@@ -983,8 +1161,9 @@ class HMIRoverDebug:
         """Envia comando IDENT y PING al receptor para handshake activo y confirmacion."""
         if self.conectado_rx and self.serial_rx and self.serial_rx.is_open:
             try:
-                self.serial_rx.write(b"IDENT\n")
-                self.serial_rx.flush()
+                with self.lock_rx:
+                    self.serial_rx.write(b"IDENT\n")
+                    self.serial_rx.flush()
                 self.log_consola("MKR", "[DIAGNOSTICO] Enviado comando 'IDENT' a RX...")
             except Exception as e:
                 self.log_consola("WARN", f"Error enviando IDENT a RX: {e}")
@@ -1403,8 +1582,12 @@ class HMIRoverDebug:
         while self.ejecutando:
             if self.conectado_tx and self.serial_tx and self.serial_tx.is_open:
                 try:
-                    linea = self.serial_tx.readline().decode('utf-8', errors='ignore').strip()
+                    linea = None
+                    with self.lock_tx:
+                        if self.serial_tx.in_waiting > 0:
+                            linea = self.serial_tx.readline().decode('utf-8', errors='ignore').strip()
                     if linea:
+                        self._tx_consecutive_errors = 0
                         if linea.startswith("ID:"):
                             parsed = self.registry.parsear_handshake(linea, strict=False)
                             if parsed:
@@ -1413,10 +1596,41 @@ class HMIRoverDebug:
                         elif linea.startswith("PONG:"):
                             self.root.after(0, self.log_consola, "SYS", f"[OK] {linea}")
                             self.root.after(0, lambda: self.badge_tx.config(text="[TX OK]", bg="#064e3b", fg="#34d399"))
+                        elif linea.startswith("TLM_TX:"):
+                            datos = linea[7:].split(',')
+                            if len(datos) >= 6:
+                                try:
+                                    izq, der = int(datos[0]), int(datos[1])
+                                    s1, s2, s3, s4 = int(datos[2]), int(datos[3]), int(datos[4]), int(datos[5])
+                                    self.snapshot_tx['izq'] = izq
+                                    self.snapshot_tx['der'] = der
+                                    self.snapshot_tx['s1'] = s1
+                                    self.snapshot_tx['s2'] = s2
+                                    self.snapshot_tx['s3'] = s3
+                                    self.snapshot_tx['s4'] = s4
+                                    self.root.after(0, self.actualizar_grafico_tx)
+                                except Exception:
+                                    pass
+                            if self.mostrar_raw_esp.get():
+                                if not self.filtrar_repetidos.get() or linea != getattr(self, "_ultima_linea_tx", None):
+                                    self._ultima_linea_tx = linea
+                                    self.root.after(0, self.log_consola, "TX", f"[TX COM4]: Trac:[{datos[0]},{datos[1]}] | Servos:[{datos[2]},{datos[3]},{datos[4]},{datos[5]}]")
+                        elif linea.startswith("[TX"):
+                            if self.mostrar_raw_esp.get():
+                                if not self.filtrar_repetidos.get() or linea != getattr(self, "_ultima_linea_tx", None):
+                                    self._ultima_linea_tx = linea
+                                    self.root.after(0, self.log_consola, "TX", f"[TX COM4]: {linea}")
+                        elif linea.startswith("SYS:") or linea.startswith("INFO:") or linea.startswith("WARN:") or linea.startswith("ERROR:"):
+                            self.root.after(0, self.log_consola, "SYS", f"[TX EVENTO]: {linea}")
                         elif self.mostrar_raw_esp.get():
-                            self.root.after(0, self.log_consola, "ESP", f"[TX RAW]: {linea}")
-                except Exception:
-                    pass
+                            if not self.filtrar_repetidos.get() or linea != getattr(self, "_ultima_linea_tx", None):
+                                self._ultima_linea_tx = linea
+                                self.root.after(0, self.log_consola, "ESP", f"[TX RAW]: {linea}")
+                except Exception as e:
+                    self._tx_consecutive_errors += 1
+                    if self._tx_consecutive_errors >= 5:
+                        if self.conectado_tx:
+                            self.desconectar_tx_por_error(str(e))
             time.sleep(0.01)
 
     def bucle_lectura_rx(self):
@@ -1426,12 +1640,19 @@ class HMIRoverDebug:
                 continue
             if self.conectado_rx and self.serial_rx and self.serial_rx.is_open:
                 try:
-                    linea = self.serial_rx.readline().decode('utf-8', errors='ignore').strip()
+                    linea = None
+                    with self.lock_rx:
+                        if self.serial_rx.in_waiting > 0:
+                            linea = self.serial_rx.readline().decode('utf-8', errors='ignore').strip()
                     if linea:
+                        self._rx_consecutive_errors = 0
                         self.contador_rx_mkr += 1
                         self.procesar_linea_mkr(linea)
-                except Exception:
-                    pass
+                except Exception as e:
+                    self._rx_consecutive_errors += 1
+                    if self._rx_consecutive_errors >= 5:
+                        if self.conectado_rx:
+                            self.desconectar_rx_por_error(str(e))
             time.sleep(0.01)
 
     def procesar_linea_mkr(self, linea):
@@ -1447,10 +1668,11 @@ class HMIRoverDebug:
             self.root.after(0, lambda: self.badge_rx.config(text="[RX OK]", bg="#451a03", fg="#fbbf24"))
             return
 
-        # Trama de telemetria estructurada TLM:izq,der,s1,s2,s3,s4,dt,cola
-        if linea.startswith("TLM:"):
-            datos = linea[4:].split(',')
-            if len(datos) >= 8:
+        # Trama de telemetria estructurada TLM:izq,der,s1,s2,s3,s4,dt,cola o TLM_RX:...
+        if linea.startswith(("TLM:", "TLM_RX:")):
+            prefijo = "TLM_RX:" if linea.startswith("TLM_RX:") else "TLM:"
+            datos = linea[len(prefijo):].split(',')
+            if len(datos) >= 6:
                 try:
                     izq = int(datos[0]) if datos[0] != "FAILSAFE" else 0
                     der = int(datos[1])
@@ -1458,8 +1680,8 @@ class HMIRoverDebug:
                     s2 = int(datos[3])
                     s3 = int(datos[4])
                     s4 = int(datos[5])
-                    dt_mkr = int(datos[6])
-                    cola = int(datos[7])
+                    dt_mkr = int(datos[6]) if len(datos) > 6 else 0
+                    cola = int(datos[7]) if len(datos) > 7 else 0
 
                     self.snapshot_rx['izq'] = izq
                     self.snapshot_rx['der'] = der
@@ -1475,10 +1697,17 @@ class HMIRoverDebug:
                     # Actualizar grafico RX y realizar validacion cruzada
                     self.root.after(0, self.actualizar_grafico_rx)
                     self.root.after(0, self.validar_datos_cruzados)
+                    if self.mostrar_raw_mkr.get():
+                        if not self.filtrar_repetidos.get() or linea != getattr(self, "_ultima_linea_rx_tlm", None):
+                            self._ultima_linea_rx_tlm = linea
+                            self.root.after(0, self.log_consola, "MKR", f"[RX TLM]: Izq:{izq} Der:{der} | Servos:[{s1},{s2},{s3},{s4}] (dt:{dt_mkr}ms)")
                 except Exception:
                     pass
-        else:
-            if self.mostrar_raw_mkr.get():
+        elif linea.startswith(("[TEST]", "[CONFIG]", "[SEGURIDAD]", "[OK]", "[ERROR]", "INFO:", "SYS:", "WARN:")):
+            self.root.after(0, self.log_consola, "SYS", f"[RX EVENTO]: {linea}")
+        elif self.mostrar_raw_mkr.get():
+            if not self.filtrar_repetidos.get() or linea != getattr(self, "_ultima_linea_rx_raw", None):
+                self._ultima_linea_rx_raw = linea
                 self.root.after(0, self.log_consola, "MKR", f"[RX RAW]: {linea}")
 
     def validar_datos_cruzados(self):
@@ -1513,41 +1742,50 @@ class HMIRoverDebug:
     # TRANSMISION DE COMANDOS (GUI -> TX)
     # =========================================================================
     def enviar_trama_actual(self):
-        cmd = self.comando_actual.upper()
-        if cmd == " ":
+        cmd = self.comando_actual.strip().upper()
+        if not cmd or cmd == " ":
             cmd = "STOP"
 
-        avg_izq = int((self.get_pwm_motor(1) + self.get_pwm_motor(2) + self.get_pwm_motor(3)) / 3)
-        avg_der = int((self.get_pwm_motor(4) + self.get_pwm_motor(5) + self.get_pwm_motor(6)) / 3)
+        # Calcular potencias efectivas aplicando trims (identico a HMI_Rover_V2.py)
+        pot_izq = int((self.get_pwm_motor(1) + self.get_pwm_motor(2) + self.get_pwm_motor(3)) / 3)
+        pot_der = int((self.get_pwm_motor(4) + self.get_pwm_motor(5) + self.get_pwm_motor(6)) / 3)
+
+        s1 = self.ang_s1.get()
+        s2 = self.ang_s2.get()
+        s3 = self.ang_s3.get()
+        s4 = self.ang_s4.get()
+
+        # Trama CSV unificada: "CMD,PotIzq,PotDer,S1,S2,S3,S4\n"
+        signo_izq = -1 if (hasattr(self, 'invertir_dir_izq') and self.invertir_dir_izq.get()) else 1
+        signo_der = -1 if (hasattr(self, 'invertir_dir_der') and self.invertir_dir_der.get()) else 1
 
         if cmd == "STOP":
-            pot_izq_efectivo = 0
-            pot_der_efectivo = 0
-            s1 = 90; s2 = 90; s3 = 90; s4 = 90
-        elif cmd == "W":
-            pot_izq_efectivo = avg_izq
-            pot_der_efectivo = avg_der
-            s1 = self.ang_s1.get(); s2 = self.ang_s2.get(); s3 = self.ang_s3.get(); s4 = self.ang_s4.get()
-        elif cmd == "S":
-            pot_izq_efectivo = -avg_izq
-            pot_der_efectivo = -avg_der
-            s1 = self.ang_s1.get(); s2 = self.ang_s2.get(); s3 = self.ang_s3.get(); s4 = self.ang_s4.get()
-        elif cmd == "PIVOT_IZQ":
-            pot_izq_efectivo = -avg_izq
-            pot_der_efectivo = avg_der
-            s1 = self.ang_s1.get(); s2 = self.ang_s2.get(); s3 = self.ang_s3.get(); s4 = self.ang_s4.get()
-        elif cmd == "PIVOT_DER":
-            pot_izq_efectivo = avg_izq
-            pot_der_efectivo = -avg_der
-            s1 = self.ang_s1.get(); s2 = self.ang_s2.get(); s3 = self.ang_s3.get(); s4 = self.ang_s4.get()
-        else: # A, D, CRAB
-            pot_izq_efectivo = avg_izq
-            pot_der_efectivo = avg_der
-            s1 = self.ang_s1.get(); s2 = self.ang_s2.get(); s3 = self.ang_s3.get(); s4 = self.ang_s4.get()
+            val_izq = 0
+            val_der = 0
+            trama = f"STOP,0,0,{s1},{s2},{s3},{s4}\n"
+        else:
+            val_izq = signo_izq * pot_izq
+            val_der = signo_der * pot_der
+            trama = f"{cmd},{val_izq},{val_der},{s1},{s2},{s3},{s4}\n"
 
+        # Snapshot para validacion y representacion grafica
         self.snapshot_tx['cmd'] = cmd
-        self.snapshot_tx['izq'] = pot_izq_efectivo
-        self.snapshot_tx['der'] = pot_der_efectivo
+        if cmd == "STOP":
+            self.snapshot_tx['izq'] = 0
+            self.snapshot_tx['der'] = 0
+        elif cmd == "S":
+            self.snapshot_tx['izq'] = -val_izq
+            self.snapshot_tx['der'] = -val_der
+        elif cmd == "PIVOT_IZQ":
+            self.snapshot_tx['izq'] = -val_izq
+            self.snapshot_tx['der'] = val_der
+        elif cmd == "PIVOT_DER":
+            self.snapshot_tx['izq'] = val_izq
+            self.snapshot_tx['der'] = -val_der
+        else: # W, A, D, CRAB
+            self.snapshot_tx['izq'] = val_izq
+            self.snapshot_tx['der'] = val_der
+
         self.snapshot_tx['s1'] = s1
         self.snapshot_tx['s2'] = s2
         self.snapshot_tx['s3'] = s3
@@ -1556,23 +1794,115 @@ class HMIRoverDebug:
 
         self.actualizar_grafico_tx()
 
-        if not self.conectado_tx or not self.serial_tx or not self.serial_tx.is_open:
-            return
-
-        trama = f"{cmd},{abs(pot_izq_efectivo)},{abs(pot_der_efectivo)},{s1},{s2},{s3},{s4}\n"
         raw_bytes = trama.encode('ascii')
 
-        try:
-            self.serial_tx.write(raw_bytes)
-            self.contador_tx += 1
+        # 1. Envio directo por Wi-Fi UDP si esta habilitado
+        if self.modo_transmision_wifi.get():
+            try:
+                if self.sock_udp is None:
+                    self.sock_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    self.sock_udp.settimeout(0.05)
+                self.sock_udp.sendto(raw_bytes, (self.ip_rover_wifi, self.puerto_rover_wifi))
+                self.contador_tx += 1
+                if self.mostrar_raw_esp.get():
+                    if not self.filtrar_repetidos.get() or trama != getattr(self, "_ultima_trama_tx_log", None):
+                        self._ultima_trama_tx_log = trama
+                        self.log_consola("TX", f"[TX PC -> WIFI UDP #{self.contador_tx}]: \"{trama.strip()}\"")
+            except Exception as e:
+                self.log_consola("WARN", f"Error enviando por Wi-Fi UDP: {e}")
 
-            hex_str = " ".join(f"{b:02X}" for b in raw_bytes)
-            msg = f"[TX PC -> MCU #{self.contador_tx}]: \"{trama.strip()}\""
-            self.log_consola("TX", msg)
-            if self.mostrar_hex.get():
-                self.log_consola("TX", f"   BYTES: [{hex_str}] ({len(raw_bytes)} B)")
+        # 2. Envio por puerto USB Serie (ESP32-C3 Dongle)
+        if self.conectado_tx and self.serial_tx and self.serial_tx.is_open:
+            try:
+                with self.lock_tx:
+                    self.serial_tx.write(raw_bytes)
+                self._tx_consecutive_errors = 0
+                self.contador_tx += 1
+                if self.mostrar_raw_esp.get():
+                    if not self.filtrar_repetidos.get() or trama != getattr(self, "_ultima_trama_tx_log", None):
+                        self._ultima_trama_tx_log = trama
+                        msg = f"[TX PC -> COM4 #{self.contador_tx}]: \"{trama.strip()}\""
+                        self.log_consola("TX", msg)
+                        if self.mostrar_hex.get():
+                            hex_str = " ".join(f"{b:02X}" for b in raw_bytes)
+                            self.log_consola("TX", f"   BYTES: [{hex_str}] ({len(raw_bytes)} B)")
+            except Exception as e:
+                self._tx_consecutive_errors += 1
+                if self._tx_consecutive_errors >= 5:
+                    self.desconectar_tx_por_error(str(e))
+                else:
+                    self.log_consola("WARN", f"[TX AVISO] Fallo transitorio de envio ({self._tx_consecutive_errors}/5): {e}")
+
+    # =========================================================================
+    # ACCIONES DE DIAGNOSTICO Y AISLAMIENTO DE ACTUADORES EN RX (COM)
+    # =========================================================================
+    def enviar_comando_rx(self, cmd_str):
+        if not self.conectado_rx or not self.serial_rx or not self.serial_rx.is_open:
+            self.log_consola("WARN", f"Puerto RX no conectado. Conecte el puerto del receptor (COM) para enviar: '{cmd_str}'")
+            return
+        try:
+            linea = f"{cmd_str.strip()}\n"
+            with self.lock_rx:
+                self.serial_rx.write(linea.encode('ascii'))
+            self._rx_consecutive_errors = 0
+            self.log_consola("SYS", f"[PC -> RX COM]: '{cmd_str.strip()}'")
         except Exception as e:
-            self.log_consola("WARN", f"Error enviando comando a TX: {e}")
+            self._rx_consecutive_errors += 1
+            if self._rx_consecutive_errors >= 5:
+                self.desconectar_rx_por_error(str(e))
+            else:
+                self.log_consola("WARN", f"[RX AVISO] Fallo transitorio de comando ({self._rx_consecutive_errors}/5): {e}")
+
+    def toggle_bloqueo_motores(self):
+        self.motores_bloqueados = not getattr(self, "motores_bloqueados", False)
+        if self.motores_bloqueados:
+            self.enviar_comando_rx("MOTORES:OFF")
+            if hasattr(self, 'btn_bloqueo_motores'):
+                self.btn_bloqueo_motores.config(text="HABILITAR MOTORES (ON)", bg="#15803d", fg="#ffffff")
+            self.log_consola("WARN", "[SEGURIDAD] Motores de traccion DESHABILITADOS por software.")
+        else:
+            self.enviar_comando_rx("MOTORES:ON")
+            if hasattr(self, 'btn_bloqueo_motores'):
+                self.btn_bloqueo_motores.config(text="BLOQUEAR MOTORES (OFF)", bg="#b91c1c", fg="#ffffff")
+            self.log_consola("WARN", "[SEGURIDAD] Motores de traccion HABILITADOS.")
+
+    def test_motor_izq_solo(self):
+        self.enviar_comando_rx("TEST:M_IZQ,75")
+
+    def test_motor_der_solo(self):
+        self.enviar_comando_rx("TEST:M_DER,75")
+
+    def test_pin_individual(self, pin_name):
+        self.log_consola("SYS", f"[TEST HARDWARE] Enviando pulso de prueba al Pin {pin_name} (Potencia: 200) por 1.0s...")
+        self.enviar_comando_rx(f"TEST:PIN_RAW,{pin_name},200")
+        self.root.after(1000, lambda: self.enviar_comando_rx(f"TEST:PIN_RAW,{pin_name},0"))
+        self.root.after(1100, lambda: self.enviar_comando_rx("STOP"))
+
+    def test_servo_individual(self, servo_idx, angulo):
+        self.enviar_comando_rx(f"TEST:S{servo_idx},{angulo}")
+
+    def test_servos_centrar(self):
+        self.enviar_comando_rx("TEST:SERVOS_CENTRO")
+
+    def parar_rx_directo(self):
+        self.enviar_comando_rx("STOP")
+        self.parar_emergencia()
+
+    def enviar_comando_manual_rx(self, event=None):
+        if hasattr(self, 'entry_cmd_manual_rx'):
+            cmd = self.entry_cmd_manual_rx.get().strip()
+            if cmd:
+                self.enviar_comando_rx(cmd)
+                self.entry_cmd_manual_rx.delete(0, tk.END)
+
+    def sincronizar_inversion_rx(self):
+        logica = 1 if (hasattr(self, 'invertir_logica_pwm') and self.invertir_logica_pwm.get()) else 0
+        dir_izq = 1 if (hasattr(self, 'invertir_dir_izq') and self.invertir_dir_izq.get()) else 0
+        dir_der = 1 if (hasattr(self, 'invertir_dir_der') and self.invertir_dir_der.get()) else 0
+        self.enviar_comando_rx(f"INV:LOGICA,{logica}")
+        self.enviar_comando_rx(f"INV:DIR_IZQ,{dir_izq}")
+        self.enviar_comando_rx(f"INV:DIR_DER,{dir_der}")
+        self.log_consola("SYS", f"[CONFIG] Inversion enviada a RX -> Logica:{logica}, DirIzq:{dir_izq}, DirDer:{dir_der}")
 
     # =========================================================================
     # DIBUJO CINEMATICO 2D: TRANSMITIDO (TX) vs RECIBIDO (RX)
@@ -1607,6 +1937,8 @@ class HMIRoverDebug:
                                arrow=tk.LAST, arrowshape=(6, 8, 3))
 
     def actualizar_grafico_tx(self):
+        if not hasattr(self, 'canvas_tx') or self.canvas_tx is None:
+            return
         c = self.canvas_tx
         c.delete("all")
         cx, cy = 87, 87
@@ -1616,16 +1948,17 @@ class HMIRoverDebug:
         tx = self.snapshot_tx
         cmd = tx['cmd']
         pwms = self.calcular_pwms_tx()
-        color = "#38b000" if (tx['izq'] != 0 or tx['der'] != 0) else "#64748b"
-        if tx['izq'] < 0 and tx['der'] < 0:
-            color = "#ff9f1c"
-
-        self.dibujar_rueda_en_canvas(c, cx - 42, cy - 36, tx['s1'], color, "M1", pwms[0])
-        self.dibujar_rueda_en_canvas(c, cx + 42, cy - 36, tx['s2'], color, "M4", pwms[3])
-        self.dibujar_rueda_en_canvas(c, cx - 42, cy,      90,        color, "M2", pwms[1])
-        self.dibujar_rueda_en_canvas(c, cx + 42, cy,      90,        color, "M5", pwms[4])
-        self.dibujar_rueda_en_canvas(c, cx - 42, cy + 36, tx['s3'], color, "M3", pwms[2])
-        self.dibujar_rueda_en_canvas(c, cx + 42, cy + 36, tx['s4'], color, "M6", pwms[5])
+        ruedas_tx = [
+            (cx - 42, cy - 36, tx['s1'], "M1", pwms[0]),
+            (cx + 42, cy - 36, tx['s2'], "M4", pwms[3]),
+            (cx - 42, cy,      90,        "M2", pwms[1]),
+            (cx + 42, cy,      90,        "M5", pwms[4]),
+            (cx - 42, cy + 36, tx['s3'], "M3", pwms[2]),
+            (cx + 42, cy + 36, tx['s4'], "M6", pwms[5]),
+        ]
+        for rx_pos, ry_pos, ang, label, p in ruedas_tx:
+            color_rueda = "#38b000" if p > 0 else ("#ff9f1c" if p < 0 else "#64748b")
+            self.dibujar_rueda_en_canvas(c, rx_pos, ry_pos, ang, color_rueda, label, p)
 
         modo_act = self.modo_conduccion.get()
         if cmd == "W":
@@ -1652,9 +1985,14 @@ class HMIRoverDebug:
             else:
                 c.create_line(cx - 15, cy + 15, cx + 20, cy - 20, fill="#ff9f1c", width=2, arrow=tk.LAST)
 
-        self.lbl_tx_valores.config(text=f"Izq:{tx['izq']} | Der:{tx['der']} | S:[{tx['s1']},{tx['s2']},{tx['s3']},{tx['s4']}]")
+        avg_izq = int((self.get_pwm_motor(1) + self.get_pwm_motor(2) + self.get_pwm_motor(3)) / 3)
+        avg_der = int((self.get_pwm_motor(4) + self.get_pwm_motor(5) + self.get_pwm_motor(6)) / 3)
+        if hasattr(self, 'lbl_tx_valores') and self.lbl_tx_valores is not None:
+            self.lbl_tx_valores.config(text=f"Master:[{avg_izq},{avg_der}] | Tx Real:[{tx['izq']},{tx['der']}] | S:[{tx['s1']},{tx['s2']},{tx['s3']},{tx['s4']}]")
 
     def actualizar_grafico_rx(self):
+        if not hasattr(self, 'canvas_rx') or self.canvas_rx is None:
+            return
         c = self.canvas_rx
         c.delete("all")
         cx, cy = 87, 87
@@ -1663,23 +2001,29 @@ class HMIRoverDebug:
 
         rx = self.snapshot_rx
         pwms = [rx['izq'], rx['izq'], rx['izq'], rx['der'], rx['der'], rx['der']]
-        color = "#38b000" if (rx['izq'] != 0 or rx['der'] != 0) else "#64748b"
-        if rx['izq'] < 0 and rx['der'] < 0:
-            color = "#ff9f1c"
-
-        self.dibujar_rueda_en_canvas(c, cx - 42, cy - 36, rx['s1'], color, "M1", pwms[0])
-        self.dibujar_rueda_en_canvas(c, cx + 42, cy - 36, rx['s2'], color, "M4", pwms[3])
-        self.dibujar_rueda_en_canvas(c, cx - 42, cy,      90,        color, "M2", pwms[1])
-        self.dibujar_rueda_en_canvas(c, cx + 42, cy,      90,        color, "M5", pwms[4])
-        self.dibujar_rueda_en_canvas(c, cx - 42, cy + 36, rx['s3'], color, "M3", pwms[2])
-        self.dibujar_rueda_en_canvas(c, cx + 42, cy + 36, rx['s4'], color, "M6", pwms[5])
+        ruedas_rx = [
+            (cx - 42, cy - 36, rx['s1'], "M1", pwms[0]),
+            (cx + 42, cy - 36, rx['s2'], "M4", pwms[3]),
+            (cx - 42, cy,      90,        "M2", pwms[1]),
+            (cx + 42, cy,      90,        "M5", pwms[4]),
+            (cx - 42, cy + 36, rx['s3'], "M3", pwms[2]),
+            (cx + 42, cy + 36, rx['s4'], "M6", pwms[5]),
+        ]
+        for rx_pos, ry_pos, ang, label, p in ruedas_rx:
+            color_rueda = "#38b000" if p > 0 else ("#ff9f1c" if p < 0 else "#64748b")
+            self.dibujar_rueda_en_canvas(c, rx_pos, ry_pos, ang, color_rueda, label, p)
 
         if rx['izq'] > 0 and rx['der'] > 0:
             c.create_line(cx, cy - 8, cx, cy - 28, fill="#38b000", width=2, arrow=tk.LAST)
         elif rx['izq'] < 0 and rx['der'] < 0:
             c.create_line(cx, cy + 8, cx, cy + 28, fill="#ff9f1c", width=2, arrow=tk.LAST)
+        elif rx['izq'] < 0 and rx['der'] > 0:
+            c.create_arc(cx - 20, cy - 20, cx + 20, cy + 20, start=45, extent=180, style=tk.ARC, outline="#fbbf24", width=2)
+        elif rx['izq'] > 0 and rx['der'] < 0:
+            c.create_arc(cx - 20, cy - 20, cx + 20, cy + 20, start=225, extent=180, style=tk.ARC, outline="#fbbf24", width=2)
 
-        self.lbl_rx_valores.config(text=f"Izq:{rx['izq']} | Der:{rx['der']} | S:[{rx['s1']},{rx['s2']},{rx['s3']},{rx['s4']}]")
+        if hasattr(self, 'lbl_rx_valores') and self.lbl_rx_valores is not None:
+            self.lbl_rx_valores.config(text=f"Izq:{rx['izq']} | Der:{rx['der']} | S:[{rx['s1']},{rx['s2']},{rx['s3']},{rx['s4']}]")
 
     # =========================================================================
     # LOGGING Y CONSOLA
@@ -1840,30 +2184,56 @@ class HMIRoverDebug:
         tipo = "Lateral Puro 90 deg" if self.servos_360.get() else "Diagonal 45 deg"
         self.log_consola("SYS", f"Geometria configurada para Modo Cangrejo ({tipo}): S1={s1} deg, S2={s2} deg, S3={s3} deg, S4={s4} deg.")
 
+    def btn_mouse_press(self, tecla):
+        self.teclas_presionadas[tecla] = True
+        self.evaluar_movimiento()
+
+    def btn_mouse_release(self, tecla):
+        self.teclas_presionadas[tecla] = False
+        self.evaluar_movimiento()
+
     def sync_master_izq(self, val):
         self.actualizar_labels_trim()
-        if self.conectado_tx and self.comando_actual != "STOP":
-            self.enviar_trama_actual()
         self.actualizar_grafico_tx()
+        t_ahora = time.time()
+        if t_ahora - getattr(self, "_ultimo_log_master", 0) > 0.4:
+            self._ultimo_log_master = t_ahora
+            self.log_consola("SYS", f"[POTENCIA MASTER] Izquierda fijada a {self.master_izq.get()} PWM (Lista para comandos WASD).")
+        if t_ahora - getattr(self, "_ultimo_envio_slider", 0) > 0.05:
+            self._ultimo_envio_slider = t_ahora
+            if (self.conectado_tx or self.modo_transmision_wifi.get()) and self.comando_actual != "STOP":
+                self.enviar_trama_actual()
 
     def sync_master_der(self, val):
         self.actualizar_labels_trim()
-        if self.conectado_tx and self.comando_actual != "STOP":
-            self.enviar_trama_actual()
         self.actualizar_grafico_tx()
+        t_ahora = time.time()
+        if t_ahora - getattr(self, "_ultimo_log_master", 0) > 0.4:
+            self._ultimo_log_master = t_ahora
+            self.log_consola("SYS", f"[POTENCIA MASTER] Derecha fijada a {self.master_der.get()} PWM (Lista para comandos WASD).")
+        if t_ahora - getattr(self, "_ultimo_envio_slider", 0) > 0.05:
+            self._ultimo_envio_slider = t_ahora
+            if (self.conectado_tx or self.modo_transmision_wifi.get()) and self.comando_actual != "STOP":
+                self.enviar_trama_actual()
 
     def al_mover_slider_motor(self, val):
         self.actualizar_labels_trim()
-        if self.conectado_tx and self.comando_actual != "STOP":
-            self.enviar_trama_actual()
         self.actualizar_grafico_tx()
+        t_ahora = time.time()
+        if t_ahora - getattr(self, "_ultimo_envio_slider", 0) > 0.05:
+            self._ultimo_envio_slider = t_ahora
+            if (self.conectado_tx or self.modo_transmision_wifi.get()) and self.comando_actual != "STOP":
+                self.enviar_trama_actual()
 
     def al_mover_servo(self, val):
         if getattr(self, '_actualizando_desde_teclas', False):
             return
-        if self.conectado_tx and self.comando_actual != "STOP":
-            self.enviar_trama_actual()
         self.actualizar_grafico_tx()
+        t_ahora = time.time()
+        if t_ahora - getattr(self, "_ultimo_envio_slider", 0) > 0.05:
+            self._ultimo_envio_slider = t_ahora
+            if (self.conectado_tx or self.modo_transmision_wifi.get()) and self.comando_actual != "STOP":
+                self.enviar_trama_actual()
 
     # =========================================================================
     # TECLADO
@@ -1900,6 +2270,7 @@ class HMIRoverDebug:
             self.comando_actual = "PIVOT_DER"
         self.enviar_trama_actual()
         self.actualizar_botones_ui(self.comando_actual)
+        self.actualizar_grafico_tx()
 
     def evaluar_movimiento(self):
         self._actualizando_desde_teclas = True
@@ -1956,6 +2327,7 @@ class HMIRoverDebug:
                 self.comando_actual = nuevo
                 self.enviar_trama_actual()
                 self.actualizar_botones_ui(nuevo)
+                self.actualizar_grafico_tx()
         finally:
             self._actualizando_desde_teclas = False
 
@@ -1976,9 +2348,13 @@ class HMIRoverDebug:
         t_ahora = time.time()
         dt = t_ahora - self.ultimo_tiempo_tasa
 
-        # Si esta activado TX Continuo y conectado TX, enviar periodicamente
-        if self.tx_continuo.get() and self.conectado_tx:
+        # Si esta activado TX Continuo y conectado TX (o WiFi), enviar periodicamente
+        if self.tx_continuo.get() and (self.conectado_tx or self.modo_transmision_wifi.get()):
             self.enviar_trama_actual()
+
+        # Actualizar representaciones graficas 2D
+        self.actualizar_grafico_tx()
+        self.actualizar_grafico_rx()
 
         # Calculo de tasa Hz
         if dt >= 1.0:

@@ -13,10 +13,30 @@ import io
 import os
 import re
 import sys
+import tempfile
+import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
-import pytest
+try:
+    import pytest
+except ImportError:
+    class _PytestCompat:
+        @staticmethod
+        def raises(expected_exception, match=None):
+            class _RaisesContext:
+                def __enter__(self):
+                    return self
+                def __exit__(self, exc_type, exc_val, exc_tb):
+                    if exc_type is None:
+                        raise AssertionError(f"Expected {expected_exception.__name__} but no exception was raised.")
+                    if not issubclass(exc_type, expected_exception):
+                        return False
+                    if match and not re.search(match, str(exc_val)):
+                        raise AssertionError(f"Exception message '{exc_val}' did not match '{match}'")
+                    return True
+            return _RaisesContext()
+    pytest = _PytestCompat()
 
 _MOD_DIR = Path(__file__).resolve().parent
 if str(_MOD_DIR) not in sys.path:
@@ -35,7 +55,7 @@ from flasher_engine import (
 # 1. PRUEBAS DE SANITIZACION DE PUERTOS SERIE
 # ==============================================================================
 
-class TestSanitizacionPuertos:
+class TestSanitizacionPuertos(unittest.TestCase):
     """Valida la sanitizacion de nombres de puertos para prevenir inyecciones de comandos."""
 
     def test_puertos_validos_linux(self):
@@ -90,7 +110,7 @@ class TestSanitizacionPuertos:
 # 2. PRUEBAS DE CONSTRUCCION DE COMANDOS ARDUINO-CLI
 # ==============================================================================
 
-class TestComandoArduinoCli:
+class TestComandoArduinoCli(unittest.TestCase):
     """Valida la construccion de comandos de compilacion y subida con arduino-cli."""
 
     def test_construccion_comando_basico(self):
@@ -144,7 +164,7 @@ class TestComandoArduinoCli:
 # 3. PRUEBAS DE CONSTRUCCION DE COMANDOS ESPTOOL
 # ==============================================================================
 
-class TestComandoEsptool:
+class TestComandoEsptool(unittest.TestCase):
     """Valida la construccion de comandos de flasheo directo con esptool."""
 
     def test_comando_esptool_binario_directo(self):
@@ -194,7 +214,7 @@ class TestComandoEsptool:
 # 4. PRUEBAS DE TRAMA DE CALIBRACION
 # ==============================================================================
 
-class TestTramaCalibracion:
+class TestTramaCalibracion(unittest.TestCase):
     """Valida el formateo y parseo de tramas de calibracion para motores y servos."""
 
     def test_formateo_con_diccionarios_1_indexados(self):
@@ -252,7 +272,7 @@ class TestTramaCalibracion:
 # 5. PRUEBAS DE VERIFICACION DE HERRAMIENTAS
 # ==============================================================================
 
-class TestVerificacionHerramientas:
+class TestVerificacionHerramientas(unittest.TestCase):
     """Valida la deteccion en el sistema de arduino-cli y esptool."""
 
     @patch("shutil.which")
@@ -304,7 +324,7 @@ class TestVerificacionHerramientas:
 # 6. PRUEBAS DE SINCRONIZACION SERIE Y PERSISTENCIA NVS
 # ==============================================================================
 
-class TestSincronizacionCalibracion:
+class TestSincronizacionCalibracion(unittest.TestCase):
     """Valida el protocolo serie para transferir y persistir calibraciones al receptor."""
 
     def test_sincronizacion_exitosa_con_ack(self):
@@ -356,7 +376,7 @@ class TestSincronizacionCalibracion:
 # 7. PRUEBAS DE EJECUCION DE SUBPROCESOS EN STREAMING
 # ==============================================================================
 
-class TestEjecucionSubprocesos:
+class TestEjecucionSubprocesos(unittest.TestCase):
     """Valida la captura en streaming de stdout y stderr."""
 
     @patch("subprocess.Popen")
@@ -404,7 +424,7 @@ class TestEjecucionSubprocesos:
 # 8. PRUEBAS DEL METODO PRINCIPAL FLASHEAR
 # ==============================================================================
 
-class TestMetodoFlashear:
+class TestMetodoFlashear(unittest.TestCase):
     """Valida el metodo flashear() integrando perfiles, roles y herramientas."""
 
     def test_flasheo_puerto_invalido(self):
@@ -480,37 +500,39 @@ class TestMetodoFlashear:
 
     @patch.object(FlasherEngine, "verificar_herramientas")
     @patch.object(FlasherEngine, "_ejecutar_subproceso")
-    def test_flasheo_fallback_esptool_con_bin(self, mock_ejecutar, mock_herramientas, tmp_path):
+    def test_flasheo_fallback_esptool_con_bin(self, mock_ejecutar, mock_herramientas):
         # arduino-cli no disponible, esptool disponible
         mock_herramientas.return_value = {"arduino_cli": False, "esptool": True}
         mock_ejecutar.return_value = True
 
-        bin_falso = tmp_path / "firmware.bin"
-        bin_falso.write_bytes(b"\x00" * 100)
+        with tempfile.TemporaryDirectory() as td:
+            tmp_path = Path(td)
+            bin_falso = tmp_path / "firmware.bin"
+            bin_falso.write_bytes(b"\x00" * 100)
 
-        perfil = PerfilHardware(
-            id="NANO_TEST",
-            nombre="Nano Test",
-            mcu="ESP32-S3",
-            fqbn="arduino:esp32:nano_nora",
-            sketch_tx=str(bin_falso),
-        )
+            perfil = PerfilHardware(
+                id="NANO_TEST",
+                nombre="Nano Test",
+                mcu="ESP32-S3",
+                fqbn="arduino:esp32:nano_nora",
+                sketch_tx=str(bin_falso),
+            )
 
-        logs = []
-        engine = FlasherEngine()
-        exito = engine.flashear(
-            puerto="COM3",
-            perfil=perfil,
-            rol="TX",
-            callback_log=logs.append,
-        )
+            logs = []
+            engine = FlasherEngine()
+            exito = engine.flashear(
+                puerto="COM3",
+                perfil=perfil,
+                rol="TX",
+                callback_log=logs.append,
+            )
 
-        assert exito is True
-        assert mock_ejecutar.called
-        cmd_ejecutado = mock_ejecutar.call_args[0][0]
-        assert any("esptool" in part for part in cmd_ejecutado)
-        assert "esp32s3" in cmd_ejecutado
-        assert "COM3" in cmd_ejecutado
+            assert exito is True
+            assert mock_ejecutar.called
+            cmd_ejecutado = mock_ejecutar.call_args[0][0]
+            assert any("esptool" in part for part in cmd_ejecutado)
+            assert "esp32s3" in cmd_ejecutado
+            assert "COM3" in cmd_ejecutado
 
     @patch.object(FlasherEngine, "verificar_herramientas")
     def test_flasheo_sin_herramientas_disponibles(self, mock_herramientas):
@@ -533,82 +555,89 @@ class TestMetodoFlashear:
 
     @patch("flasher_engine.FlasherEngine.verificar_herramientas")
     @patch("flasher_engine.FlasherEngine._ejecutar_subproceso")
-    def test_flasheo_bin_con_ambas_herramientas_disponibles(self, mock_ejecutar, mock_verificar, tmp_path):
+    def test_flasheo_bin_con_ambas_herramientas_disponibles(self, mock_ejecutar, mock_verificar):
         """Verifica que si se pasa un archivo .bin y ambas herramientas estan presentes, se use esptool."""
         mock_verificar.return_value = {"arduino_cli": True, "esptool": True}
         mock_ejecutar.return_value = True
 
-        fake_bin = tmp_path / "firmware.bin"
-        fake_bin.write_bytes(b"\x00" * 32)
+        with tempfile.TemporaryDirectory() as td:
+            tmp_path = Path(td)
+            fake_bin = tmp_path / "firmware.bin"
+            fake_bin.write_bytes(b"\x00" * 32)
 
-        registry = HardwareProfileRegistry()
-        perfil = registry.obtener_perfil("ARDUINO_NANO_ESP32")
+            registry = HardwareProfileRegistry()
+            perfil = registry.obtener_perfil("ARDUINO_NANO_ESP32")
 
-        engine = FlasherEngine()
-        exito = engine.flashear(
-            puerto="COM3",
-            perfil=perfil,
-            rol="TX",
-            bin_path_override=fake_bin,
-        )
+            engine = FlasherEngine()
+            exito = engine.flashear(
+                puerto="COM3",
+                perfil=perfil,
+                rol="TX",
+                bin_path_override=fake_bin,
+            )
 
-        assert exito is True
-        mock_ejecutar.assert_called_once()
-        cmd_ejecutado = mock_ejecutar.call_args[0][0]
-        assert any("esptool" in part for part in cmd_ejecutado)
+            assert exito is True
+            mock_ejecutar.assert_called_once()
+            cmd_ejecutado = mock_ejecutar.call_args[0][0]
+            assert any("esptool" in part for part in cmd_ejecutado)
 
     @patch("flasher_engine.FlasherEngine.verificar_herramientas")
-    def test_flasheo_samd_incompatible_con_esptool(self, mock_verificar, tmp_path):
+    def test_flasheo_samd_incompatible_con_esptool(self, mock_verificar):
         """Verifica que un perfil SAMD21 (MKR1310) rechace el uso de esptool con un mensaje claro."""
         mock_verificar.return_value = {"arduino_cli": False, "esptool": True}
 
-        fake_bin = tmp_path / "firmware.bin"
-        fake_bin.write_bytes(b"\x00" * 32)
+        with tempfile.TemporaryDirectory() as td:
+            tmp_path = Path(td)
+            fake_bin = tmp_path / "firmware.bin"
+            fake_bin.write_bytes(b"\x00" * 32)
 
-        registry = HardwareProfileRegistry()
-        perfil = registry.obtener_perfil("ARDUINO_MKR_1310")
+            registry = HardwareProfileRegistry()
+            perfil = registry.obtener_perfil("ARDUINO_MKR_1310")
 
-        logs = []
-        engine = FlasherEngine()
-        exito = engine.flashear(
-            puerto="COM4",
-            perfil=perfil,
-            rol="RX",
-            bin_path_override=fake_bin,
-            callback_log=logs.append,
-        )
+            logs = []
+            engine = FlasherEngine()
+            exito = engine.flashear(
+                puerto="COM4",
+                perfil=perfil,
+                rol="RX",
+                bin_path_override=fake_bin,
+                callback_log=logs.append,
+            )
 
-        assert exito is False
-        assert any("no es compatible con esptool" in log.lower() for log in logs)
+            assert exito is False
+            assert any("no es compatible con esptool" in log.lower() for log in logs)
 
 
 # ==============================================================================
 # 9. REGLA ESTRICTA DE PROYECTO: CERO EMOJIS
 # ==============================================================================
 
-def test_cero_emojis_en_archivos_de_tarea():
-    """Verifica que no existan emojis en los archivos fuente creados para la Tarea 3."""
-    directorio = Path(__file__).resolve().parent
-    archivos = [
-        directorio / "flasher_engine.py",
-        directorio / "test_flasher_engine.py",
-    ]
+class TestCeroEmojis(unittest.TestCase):
+    """Verifica que no existan emojis en los archivos fuente creados para la suite."""
 
-    patron_emoji = re.compile(
-        "[\U00010000-\U0010ffff"
-        "\u2600-\u26FF"
-        "\u2700-\u27BF"
-        "\u2300-\u23FF"
-        "\u2B50-\u2B55"
-        "\u203C\u2049\u2122\u2139\u2194-\u2199\u21A9-\u21AA"
-        "]",
-        flags=re.UNICODE,
-    )
+    def test_cero_emojis_en_archivos_de_tarea(self):
+        directorio = Path(__file__).resolve().parent
+        archivos = [
+            directorio / "flasher_engine.py",
+            directorio / "test_flasher_engine.py",
+        ]
 
-    for archivo in archivos:
-        if archivo.exists():
-            contenido = archivo.read_text(encoding="utf-8")
-            coincidencias = patron_emoji.findall(contenido)
-            assert not coincidencias, (
-                f"Se detectaron emojis prohibidos en {archivo.name}: {coincidencias}"
-            )
+        patron_emoji = re.compile(
+            "[\U00010000-\U0010ffff"
+            "\u2600-\u26FF"
+            "\u2700-\u27BF"
+            "\u2300-\u23FF"
+            "\u2B50-\u2B55"
+            "\u203C\u2049\u2122\u2139\u2194-\u2199\u21A9-\u21AA"
+            "]",
+            flags=re.UNICODE,
+        )
+
+        for archivo in archivos:
+            if archivo.exists():
+                contenido = archivo.read_text(encoding="utf-8")
+                coincidencias = patron_emoji.findall(contenido)
+                assert not coincidencias, (
+                    f"Se detectaron emojis prohibidos en {archivo.name}: {coincidencias}"
+                )
+
