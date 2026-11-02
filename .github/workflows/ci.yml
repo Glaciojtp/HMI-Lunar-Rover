@@ -7,35 +7,29 @@ on:
     branches: [ main ]
 
 jobs:
-  build:
+  pruebas:
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyserial
+      - name: Estructura, firmware en banco host y logica de las HMI
+        run: python -m unittest discover -s tests -v
 
-    # Set up Python
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-
-    - name: Install Python dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install adafruit-pca9685
-        # Install any other test requirements if needed
-
-    - name: Run Python tests
-      run: |
-        python -m unittest discover -s tests -p "test_*.py"
-
-    # Set up Rust
-    - name: Set up Rust
-      uses: actions/setup-rust@v1
-      with:
-        rust-version: stable
-
-    - name: Run Rust tests
-      run: |
-        cd 04_Legacy_y_Versiones_Previas/Rust
-        cargo test --quiet
+  firmware:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compilar los dos firmwares con el nucleo real
+        uses: arduino/compile-sketches@v1
+        with:
+          fqbn: arduino:esp32:nano_nora
+          platforms: |
+            - name: arduino:esp32
+          libraries: |
+            - name: Adafruit PWM Servo Driver Library
+          sketch-paths: |
+            - 01_Oficial/Transmisor_NanoESP32
+            - 01_Oficial/Ejecutor_NanoESP32

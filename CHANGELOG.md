@@ -7,22 +7,35 @@
 
 ---
 
-## Politica de Ciclo de Vida del Software
+## Politica
 
-1. **Fase Beta (Desarrollo Activo y Pruebas Unitarias):**
-   - Todo cambio experimental, nueva funcion o correccion de errores se desarrolla inicialmente como una mini-version o rama `beta`.
-   - Se realizan pruebas en banco de trabajo y se documenta cada modificacion en la bitacora de cambios.
-   - Los archivos experimentales se ubican en `02_Debug_y_Pruebas/` o se identifican con sufijo `_beta`.
-2. **Fase Pre-Release (Validacion Integral de Subsistemas):**
-   - Una vez que la serie de cambios beta demuestra estabilidad funcional en hardware real y supera los tests unitarios, se consolida en una `pre-release` (ej. `v2.2-pre`).
-   - Se evalua la interoperabilidad entre HMI (Python/Rust), Transmisor y Receptor en condiciones combinadas de traccion, direccion y telemetria.
-3. **Fase Release Oficial (Produccion y Despliegue Estable):**
-   - Al completarse todos los objetivos planificados del hito y verificarse la ausencia de regresiones, la pre-release se formaliza como `release` oficial definitiva (ej. `v2.1`, `v2.2`).
-   - Los archivos de produccion se ubican exclusivamente en `01_Oficial/` y se actualizan los lanzadores inteligentes (`Lanzar_HMI_Rover.bat`, `Compilar_HMI_a_EXE.bat`).
+Un solo archivo activo por pieza, editado en el lugar. Los experimentos van en ramas de git. Ver `AGENTS.md`. Esta politica reemplaza al ciclo Beta, Pre-Release y Release basado en copias de archivos.
 
 ---
 
 ## Historial de Versiones
+
+### [v3.0] - 2026-11-02 (logica verificada en PC, pendiente de hardware)
+
+#### Reorganizacion
+- Sistema activo reducido a cuatro archivos en `01_Oficial/`: firmware del transmisor, firmware del ejecutor, HMI normal y HMI debug.
+- `04_Legacy_y_Versiones_Previas/`, `02_Debug_y_Pruebas/` y el resto de versiones pasan a `04_Deprecado/`, con indice.
+- Rust, LiDAR y joystick pasan a `05_Futuro/`.
+- README (con estado actual y capturas de las HMI), AGENTS y esquematico reescritos. `tests/test_estructura.py` hace cumplir la regla.
+
+#### Firmware
+- El transmisor es el Access Point; el ejecutor es estacion con canal e IP fijos.
+- Protocolo UDP nuevo con secuencia, CRC-8 y telemetria de retorno, incluida la causa del ultimo reinicio.
+- Ejecutor: rampas de PWM, inversion por cero, arranque desfasado, servos escalonados, fases por canal en el PCA9685, arranque por etapas, potencia WiFi reducida y salida USB no bloqueante.
+- Ejecutor: PCA9685 para servos, L298N por defecto, L9110S seleccionable. Pines corregidos para Nano ESP32.
+- Transmisor: envio a 20 Hz fijos y parada si la HMI deja de enviar durante 500 ms.
+
+#### HMI
+- `HMI_Rover.py`: envio continuo a 20 Hz en hilo propio, signos reales, cadena de senales de conexion, alerta de reinicio, reconexion USB y parada al perder el foco.
+- `HMI_Rover_Debug.py`: dos placas a la vez, comparacion por secuencia, graficas de enviado, recibido y aplicado, marcas de reinicio, perfiles de prueba y exportacion CSV.
+- Se retiran el flasheo integrado, los perfiles de hardware, la calibracion NVS, el modo de servos 360 y la telemetria de joystick.
+
+---
 
 ### [v2.3.0-pre] - 2026-10-06 (Pre-Release Servos Posicionales Estandar)
 
