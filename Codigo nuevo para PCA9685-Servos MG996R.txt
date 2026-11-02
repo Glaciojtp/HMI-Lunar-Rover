@@ -1,0 +1,54 @@
+#include <Wire.h>
+#include <Adafruit_PWMServoDriver.h>
+
+Adafruit_PWMServoDriver pca = Adafruit_PWMServoDriver(0x40);
+
+#define SERVO_CHANNEL 0
+
+// Pulsos iniciales para el MG996R
+#define SERVO_MIN 150
+#define SERVO_MAX 550
+
+void setup() {
+  Serial.begin(9600);
+  Wire.begin();
+
+  pca.begin();
+  pca.setPWMFreq(50);
+
+  delay(500);
+
+  Serial.println("Control del MG996R por puerto serie");
+  Serial.println("Escribe un angulo entre 0 y 180");
+  Serial.println("Presiona Enter para mover el servo");
+
+  // Posicion inicial aproximada: 90 grados
+  moverServo(90);
+}
+
+void loop() {
+  if (Serial.available() > 0) {
+    int angulo = Serial.parseInt();
+
+    // Limpiar los caracteres restantes del envio
+    while (Serial.available() > 0) {
+      Serial.read();
+    }
+
+    if (angulo >= 0 && angulo <= 180) {
+      moverServo(angulo);
+
+      Serial.print("Angulo solicitado: ");
+      Serial.print(angulo);
+      Serial.println(" grados");
+    } else {
+      Serial.println("Error: escribe un valor entre 0 y 180");
+    }
+  }
+}
+
+void moverServo(int angulo) {
+  int pulso = map(angulo, 0, 180, SERVO_MIN, SERVO_MAX);
+
+  pca.setPWM(SERVO_CHANNEL, 0, pulso);
+}
