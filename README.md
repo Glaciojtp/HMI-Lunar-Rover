@@ -6,7 +6,7 @@
 
 ![Versión](https://img.shields.io/badge/versi%C3%B3n-v3.0-2a78d6)
 ![Pruebas en PC](https://img.shields.io/badge/pruebas%20en%20PC-pasan-1baf7a)
-![Compilación ESP32](https://img.shields.io/badge/compilaci%C3%B3n%20ESP32-pendiente-eda100)
+![Compilación ESP32](https://img.shields.io/badge/compilaci%C3%B3n%20ESP32-pasa-1baf7a)
 ![Hardware](https://img.shields.io/badge/validaci%C3%B3n%20en%20hardware-pendiente-eda100)
 
 [Estado actual](#estado-actual) ·
@@ -26,7 +26,7 @@
 
 *Actualizado: 2 de noviembre de 2026.*
 
-La versión **v3.0** reorganiza todo el proyecto y ataca los reinicios del ejecutor por software. La lógica está probada en PC, pero **todavía no se probó en el rover**.
+La versión **v3.0** reorganiza todo el proyecto y ataca los reinicios del ejecutor por software. La lógica está probada en PC y los firmwares compilan para ESP32, pero **todavía no se probó en el rover**.
 
 > [!IMPORTANT]
 > El problema que está abierto es el reinicio del ejecutor por picos de corriente. El firmware nuevo reduce los picos e informa la causa de cada reinicio, pero hasta medir en el rover no se puede afirmar que estén resueltos. La alimentación se sigue revisando.
@@ -38,13 +38,13 @@ La versión **v3.0** reorganiza todo el proyecto y ataca los reinicios del ejecu
 | Organización del repositorio | **Listo** | Un solo archivo activo por pieza. Lo anterior está archivado |
 | Lógica de los firmwares | **Probada en PC** | Se ejecutan los `.ino` reales con hardware simulado |
 | HMI normal y HMI debug | **Probadas en PC** | Con puertos simulados en Windows. Falta probarlas con las placas |
-| Compilación para ESP32 | **Pendiente** | Falta compilar con el paquete Arduino ESP32 Boards |
+| Compilación para ESP32 | **Lista** | Los dos firmwares compilan en el CI con el paquete Arduino ESP32 Boards |
 | Prueba en el rover | **Pendiente** | Falta recablear el ejecutor y hacer el diagnóstico en banco |
 | Alimentación | **En revisión** | Ver [Alimentación y reinicios](#alimentación-y-reinicios) |
 
 ### Próximos pasos
 
-1. Compilar y cargar los dos firmwares.
+1. Cargar los dos firmwares.
 2. Confirmar qué **puente H** está montado. El firmware viene para L298N, pero los documentos anteriores decían L9110S.
 3. Recablear el ejecutor: **los pines cambiaron** respecto de las versiones anteriores.
 4. Confirmar el **modelo de servo**, porque define el regulador necesario.

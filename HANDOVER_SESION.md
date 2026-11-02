@@ -10,12 +10,12 @@ Ultima actualizacion: 2026-11-02.
 |---|---|
 | Version activa | v3.0 |
 | Pruebas en PC (`tests/`) | Pasan |
-| Compilacion con el nucleo ESP32 real | **Pendiente** |
+| Compilacion con el nucleo ESP32 real | Pasa en CI (`arduino:esp32:nano_nora`) |
 | Prueba en hardware | **Pendiente** |
 
 ## Tareas inmediatas
 
-1. Compilar y cargar los dos firmwares.
+1. Cargar los dos firmwares.
 2. Confirmar el puente H instalado. El firmware usa L298N por defecto, tomado del ultimo commit del equipo. Los documentos anteriores decian L9110S.
 3. Recablear el ejecutor segun el esquematico: los pines del firmware anterior no eran validos para esta placa.
 4. Confirmar el modelo de servo. Determina la corriente del riel de servos: MG996R requiere un regulador de al menos 10 A.

@@ -15,7 +15,7 @@ Un solo archivo activo por pieza, editado en el lugar. Los experimentos van en r
 
 ## Historial de Versiones
 
-### [v3.0] - 2026-11-02 (logica verificada en PC, pendiente de hardware)
+### [v3.0] - 2026-11-02 (compila y logica verificada en PC, pendiente de hardware)
 
 #### Reorganizacion
 - Sistema activo reducido a cuatro archivos en `01_Oficial/`: firmware del transmisor, firmware del ejecutor, HMI normal y HMI debug.
