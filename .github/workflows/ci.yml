@@ -19,7 +19,8 @@ jobs:
         run: python -m unittest discover -s tests -v
 
   firmware:
-    runs-on: ubuntu-latest
+    # compile-sketches necesita Python 3.12.4, que no existe para Ubuntu 26.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Compilar los dos firmwares con el nucleo real
