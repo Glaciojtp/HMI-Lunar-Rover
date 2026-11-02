@@ -4,8 +4,7 @@
 MINI TESTER INDEPENDIENTE — ROVER LUNAR V2.0
 Herramienta de diagnostico y prueba unitaria para actuadores del Rover:
   - Traccion izquierda (Pines D2/D5) y derecha (Pines D3/D4)
-  - Servomotores independientes S1 (D6), S2 (D7), S3 (D8), S4 (A0)
-  - Diagnostico diferencial entre Servos 180 Posicionales y Servos 360 Continuos
+  - Servomotores independientes S1 (D6), S2 (D7), S3 (D8), S4 (A0) con angulo directo [10, 170]
   - Enlace dual: Puerto Serie USB (COM) o Wi-Fi UDP (192.168.4.1:4210)
 
 Regla estricta: Cero emojis en toda la aplicacion.
@@ -157,8 +156,6 @@ class RoverCommunicator:
         with self.lock:
             try:
                 if self.modo == "SERIAL" and self.ser and self.ser.is_open:
-                    # Si va por serial hacia el transmisor, se envia como comando CSV o binario
-                    # Transmisor v2.2 interpreta CSV 'CMD,izq,der,s1,s2,s3,s4' de forma optima
                     cmd_csv = f"CMD,{t_izq},{t_der},{a1},{a2},{a3},{a4}\n"
                     self.ser.write(cmd_csv.encode("utf-8"))
                     self.log(f"[TX-BIN-CSV] CMD,{t_izq},{t_der},{a1},{a2},{a3},{a4}")
@@ -202,8 +199,8 @@ class MiniTesterRoverGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("Mini Tester de Actuadores — Rover Lunar V2.0")
-        self.root.geometry("1180x820")
-        self.root.minsize(1050, 750)
+        self.root.geometry("1180x800")
+        self.root.minsize(1050, 720)
         self.root.configure(bg="#161823")
 
         self.comm = RoverCommunicator(callback_log=self.agregar_log, callback_status=self.actualizar_estado_conexion)
@@ -212,19 +209,11 @@ class MiniTesterRoverGUI:
         self.pwm_izq = tk.IntVar(value=0)
         self.pwm_der = tk.IntVar(value=0)
 
-        # Variables de control de servos
+        # Variables de control de servos (angulos directos 10 a 170 grados)
         self.ang_s1 = tk.IntVar(value=90)
         self.ang_s2 = tk.IntVar(value=90)
         self.ang_s3 = tk.IntVar(value=90)
         self.ang_s4 = tk.IntVar(value=90)
-
-        self.us_s1 = tk.IntVar(value=1500)
-        self.us_s2 = tk.IntVar(value=1500)
-        self.us_s3 = tk.IntVar(value=1500)
-        self.us_s4 = tk.IntVar(value=1500)
-
-        self.duracion_pulso_ms = tk.IntVar(value=140)
-        self.modo_servos = tk.StringVar(value="360")  # "180" o "360"
 
         # Variables de comunicacion
         self.tipo_conexion = tk.StringVar(value="SERIAL")
@@ -321,7 +310,7 @@ class MiniTesterRoverGUI:
         # Columna 1: Traccion y Motores DC
         self._construir_panel_motores(frame_main)
 
-        # Columna 2: Servomotores de Direccion (180 vs 360)
+        # Columna 2: Servomotores de Direccion (Angulo Directo)
         self._construir_panel_servos(frame_main)
 
         # Columna 3: Diagnostico y Consola de Telemetria
@@ -513,73 +502,52 @@ class MiniTesterRoverGUI:
         self.comm.enviar_texto("MOT:PARAR\n")
 
     # ==========================================
-    # PANEL DE SERVOMOTORES (180 VS 360)
+    # PANEL DE SERVOMOTORES (CONTROL ANGULAR DIRECTO)
     # ==========================================
     def _construir_panel_servos(self, parent):
         frame = ttk.Frame(parent, style="Card.TFrame")
         frame.grid(row=0, column=1, sticky="nsew", padx=4, pady=4)
 
         ttk.Label(frame, text="SERVOMOTORES DE DIRECCION (S1..S4)", style="CardHeader.TLabel").pack(anchor="w", padx=10, pady=(8, 2))
+        ttk.Label(frame, text="Posicion angular directa [10, 170] grados. Centro = 90 grados.", style="Muted.TLabel").pack(anchor="w", padx=10, pady=(0, 6))
 
-        # Selector de Modo en el Firmware
-        frm_modo = ttk.Frame(frame, style="Card.TFrame")
-        frm_modo.pack(fill="x", padx=8, pady=4)
-        ttk.Label(frm_modo, text="MODO DE OPERACION DE SERVOS:", style="SubHeader.TLabel").pack(anchor="w", padx=6, pady=(4, 2))
+        # Contenedor para los 4 Servos
+        scrollable_frame = ttk.Frame(frame, style="Card.TFrame")
+        scrollable_frame.pack(fill="both", expand=True, padx=4, pady=2)
 
-        f_rb_m = ttk.Frame(frm_modo)
-        f_rb_m.pack(fill="x", padx=6, pady=2)
-        ttk.Radiobutton(f_rb_m, text="Modo 180 Posicional (Angulo)", variable=self.modo_servos, value="180", command=self._conmutar_modo_servos).pack(side="left", padx=4)
-        ttk.Radiobutton(f_rb_m, text="Modo 360 Continuo (Pulsos)", variable=self.modo_servos, value="360", command=self._conmutar_modo_servos).pack(side="left", padx=4)
-
-        # Contenedor con Scroll o Compacto para los 4 Servos
-        canvas = tk.Canvas(frame, bg="#212433", highlightthickness=0)
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas, style="Card.TFrame")
-
-        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side="top", fill="both", expand=True, padx=4, pady=2)
-        scrollbar.pack(side="right", fill="y")
-
-        # Construir tarjeta individual por cada servo
         self.labels_ang_servos = {}
-        self.labels_us_servos = {}
 
         servos_info = [
-            (1, "S1: Delantero Izquierdo (Pin D6)", self.ang_s1, self.us_s1),
-            (2, "S2: Delantero Derecho   (Pin D7)", self.ang_s2, self.us_s2),
-            (3, "S3: Trasero Izquierdo   (Pin D8)", self.ang_s3, self.us_s3),
-            (4, "S4: Trasero Derecho     (Pin A0)", self.ang_s4, self.us_s4)
+            (1, "S1: Delantero Izquierdo (Pin D6)", self.ang_s1),
+            (2, "S2: Delantero Derecho   (Pin D7)", self.ang_s2),
+            (3, "S3: Trasero Izquierdo   (Pin D8)", self.ang_s3),
+            (4, "S4: Trasero Derecho     (Pin A0)", self.ang_s4)
         ]
 
-        for s_num, s_nom, var_ang, var_us in servos_info:
-            self._crear_tarjeta_servo(scrollable_frame, s_num, s_nom, var_ang, var_us)
+        for s_num, s_nom, var_ang in servos_info:
+            self._crear_tarjeta_servo(scrollable_frame, s_num, s_nom, var_ang)
 
         # Botonera de Pruebas Globales de Servos
         frm_glob_srv = ttk.Frame(frame, style="Card.TFrame")
-        frm_glob_srv.pack(fill="x", padx=8, pady=4)
+        frm_glob_srv.pack(fill="x", padx=8, pady=6)
 
         f_gs1 = ttk.Frame(frm_glob_srv)
         f_gs1.pack(fill="x", padx=6, pady=2)
-        ttk.Button(f_gs1, text="Todos a 90° (Centro)", style="Dark.TButton", command=self._centrar_todos_servos).pack(side="left", expand=True, fill="x", padx=1)
-        ttk.Button(f_gs1, text="Frenar a Neutro (360)", style="Warn.TButton", command=lambda: self.comm.enviar_texto("TEST:SERVOS_CENTRO\n")).pack(side="left", expand=True, fill="x", padx=1)
+        ttk.Button(f_gs1, text="Centrar Todos a 90°", style="Accent.TButton", command=self._centrar_todos_servos).pack(side="left", expand=True, fill="x", padx=1)
 
         f_gs2 = ttk.Frame(frm_glob_srv)
         f_gs2.pack(fill="x", padx=6, pady=2)
-        ttk.Button(f_gs2, text="Test Sweep (Viraje)", style="Dark.TButton", command=lambda: self.comm.enviar_texto("TEST:SWEEP\n")).pack(side="left", expand=True, fill="x", padx=1)
-        ttk.Button(f_gs2, text="Guardar Calibracion NVS", style="Success.TButton", command=lambda: self.comm.enviar_texto("GUARDAR\n")).pack(side="left", expand=True, fill="x", padx=1)
+        ttk.Button(f_gs2, text="Viraje Izquierda (60° / 120°)", style="Dark.TButton", command=self._viraje_izquierda).pack(side="left", expand=True, fill="x", padx=1)
+        ttk.Button(f_gs2, text="Viraje Derecha (120° / 60°)", style="Dark.TButton", command=self._viraje_derecha).pack(side="left", expand=True, fill="x", padx=1)
 
-    def _crear_tarjeta_servo(self, parent, num, nombre, var_ang, var_us):
+    def _crear_tarjeta_servo(self, parent, num, nombre, var_ang):
         card = ttk.Frame(parent, style="Card.TFrame")
-        card.pack(fill="x", padx=4, pady=3)
+        card.pack(fill="x", padx=6, pady=4)
 
-        ttk.Label(card, text=nombre, style="SubHeader.TLabel").pack(anchor="w", padx=6, pady=(3, 1))
+        ttk.Label(card, text=nombre, style="SubHeader.TLabel").pack(anchor="w", padx=6, pady=(4, 2))
 
-        # Fila 1: Control de Angulo (10° a 170°)
         f_ang = ttk.Frame(card)
-        f_ang.pack(fill="x", padx=6, pady=1)
+        f_ang.pack(fill="x", padx=6, pady=(2, 6))
 
         lbl_a = ttk.Label(f_ang, text="Angulo: 90°", width=12, background="#212433", foreground="#00f5d4")
         lbl_a.pack(side="left")
@@ -590,33 +558,13 @@ class MiniTesterRoverGUI:
                           command=lambda v, n=num: self._al_mover_angulo_servo(n, v))
         sc_ang.pack(side="left", fill="x", expand=True, padx=4)
 
-        ttk.Button(f_ang, text="60°", width=4, style="Dark.TButton", command=lambda n=num: self._fijar_angulo(n, 60)).pack(side="left", padx=1)
-        ttk.Button(f_ang, text="90°", width=4, style="Dark.TButton", command=lambda n=num: self._fijar_angulo(n, 90)).pack(side="left", padx=1)
-        ttk.Button(f_ang, text="120°", width=4, style="Dark.TButton", command=lambda n=num: self._fijar_angulo(n, 120)).pack(side="left", padx=1)
-
-        # Fila 2: Control de Microsegundos (1000 us a 2000 us) para diagnostico continuo
-        f_us = ttk.Frame(card)
-        f_us.pack(fill="x", padx=6, pady=(1, 3))
-
-        lbl_u = ttk.Label(f_us, text="Pulso: 1500 us", width=14, background="#212433", foreground="#ff9f1c")
-        lbl_u.pack(side="left")
-        self.labels_us_servos[num] = lbl_u
-
-        sc_us = tk.Scale(f_us, from_=1000, to=2000, orient="horizontal", variable=var_us,
-                         bg="#161823", fg="#ff9f1c", highlightthickness=0,
-                         command=lambda v, n=num: self._al_mover_us_servo(n, v))
-        sc_us.pack(side="left", fill="x", expand=True, padx=4)
-
-        ttk.Button(f_us, text="-5", width=3, style="Dark.TButton", command=lambda n=num: self._ajuste_us(n, -5)).pack(side="left", padx=1)
-        ttk.Button(f_us, text="-1", width=3, style="Dark.TButton", command=lambda n=num: self._ajuste_us(n, -1)).pack(side="left", padx=1)
-        ttk.Button(f_us, text="STOP", width=5, style="Warn.TButton", command=lambda n=num: self._ajuste_us_stop(n)).pack(side="left", padx=1)
-        ttk.Button(f_us, text="+1", width=3, style="Dark.TButton", command=lambda n=num: self._ajuste_us(n, 1)).pack(side="left", padx=1)
-        ttk.Button(f_us, text="+5", width=3, style="Dark.TButton", command=lambda n=num: self._ajuste_us(n, 5)).pack(side="left", padx=1)
+        ttk.Button(f_ang, text="60° (Izq)", width=8, style="Dark.TButton", command=lambda n=num: self._fijar_angulo(n, 60)).pack(side="left", padx=1)
+        ttk.Button(f_ang, text="90° (Centro)", width=10, style="Warn.TButton", command=lambda n=num: self._fijar_angulo(n, 90)).pack(side="left", padx=1)
+        ttk.Button(f_ang, text="120° (Der)", width=8, style="Dark.TButton", command=lambda n=num: self._fijar_angulo(n, 120)).pack(side="left", padx=1)
 
     def _al_mover_angulo_servo(self, num, val):
         ang = int(float(val))
         self.labels_ang_servos[num].config(text=f"Angulo: {ang}°")
-        # Si el usuario esta en modo 180 o quiere probar el comando directo
         self.comm.enviar_texto(f"TEST:S{num},{ang}\n")
 
     def _fijar_angulo(self, num, ang):
@@ -624,66 +572,47 @@ class MiniTesterRoverGUI:
         var.set(ang)
         self._al_mover_angulo_servo(num, ang)
 
-    def _al_mover_us_servo(self, num, val):
-        us = int(float(val))
-        self.labels_us_servos[num].config(text=f"Pulso: {us} us")
-        self.comm.enviar_texto(f"TEST:S{num},{us}\n")
-
-    def _ajuste_us(self, num, delta):
-        var = getattr(self, f"us_s{num}")
-        nuevo = max(1000, min(2000, var.get() + delta))
-        var.set(nuevo)
-        self._al_mover_us_servo(num, nuevo)
-
-    def _ajuste_us_stop(self, num):
-        var = getattr(self, f"us_s{num}")
-        var.set(1500)
-        self._al_mover_us_servo(num, 1500)
-        # Tambien fijar neutro de calibracion
-        self.comm.enviar_texto(f"S{num}=1500\n")
-
-    def _conmutar_modo_servos(self):
-        modo = self.modo_servos.get()
-        if modo == "180":
-            self.comm.enviar_texto("MODO:SERVOS,180\n")
-            self.agregar_log("[CONFIG] Conmutando Firmware a MODO 180 POSICIONAL (angulo directo).")
-        else:
-            self.comm.enviar_texto("MODO:SERVOS,360\n")
-            self.agregar_log("[CONFIG] Conmutando Firmware a MODO 360 CONTINUO (pulsos temporizados).")
-
     def _centrar_todos_servos(self):
         for i in range(1, 5):
             getattr(self, f"ang_s{i}").set(90)
-            getattr(self, f"us_s{i}").set(1500)
             self.labels_ang_servos[i].config(text="Angulo: 90°")
-            self.labels_us_servos[i].config(text="Pulso: 1500 us")
         self.comm.enviar_texto("TEST:SERVOS_CENTRO\n")
 
+    def _viraje_izquierda(self):
+        self._fijar_angulo(1, 60)
+        self._fijar_angulo(2, 60)
+        self._fijar_angulo(3, 120)
+        self._fijar_angulo(4, 120)
+
+    def _viraje_derecha(self):
+        self._fijar_angulo(1, 120)
+        self._fijar_angulo(2, 120)
+        self._fijar_angulo(3, 60)
+        self._fijar_angulo(4, 60)
+
     # ==========================================
-    # PANEL DE DIAGNOSTICO DIDACTICO Y CONSOLA
+    # PANEL DE DIAGNOSTICO Y CONSOLA
     # ==========================================
     def _construir_panel_diagnostico_y_consola(self, parent):
         frame = ttk.Frame(parent, style="Card.TFrame")
         frame.grid(row=0, column=2, sticky="nsew", padx=4, pady=4)
 
-        ttk.Label(frame, text="DIAGNOSTICO DE SERVOS Y CONSOLA", style="CardHeader.TLabel").pack(anchor="w", padx=10, pady=(8, 2))
+        ttk.Label(frame, text="DIAGNOSTICO Y CONSOLA DE COMANDOS", style="CardHeader.TLabel").pack(anchor="w", padx=10, pady=(8, 2))
 
-        # Cuadro explicativo didactico
+        # Cuadro explicativo
         frm_diag = ttk.Frame(frame, style="Card.TFrame")
         frm_diag.pack(fill="x", padx=8, pady=4)
 
-        ttk.Label(frm_diag, text="¿POR QUE UN SERVO SIGUE GIRANDO AL MANDAR UN ANGULO?", style="SubHeader.TLabel").pack(anchor="w", padx=6, pady=(4, 2))
+        ttk.Label(frm_diag, text="ARQUITECTURA DE DIRECCION 4WS", style="SubHeader.TLabel").pack(anchor="w", padx=6, pady=(4, 2))
 
         explicacion = (
-            "1. Si al mandar 60° o 120° el servo NO se detiene y sigue girando en circulos,\n"
-            "   tu hardware son SERVOS DE ROTACION CONTINUA 360° (ej. MG90S 360).\n"
-            "   En estos servos, el pulso NO controla posicion, sino VELOCIDAD.\n"
-            "2. El UNICO valor que frena un servo 360 es su punto neutro (aprox. 1500 us).\n"
-            "3. Prueba rapida: usa los botones de 'Pulso us' de arriba. Pon 1500 us.\n"
-            "   Si al poner 1500 us se detiene, y al poner 1400 us gira a la izquierda\n"
-            "   y con 1600 us gira a la derecha, ¡queda confirmado que es un servo 360!\n"
-            "4. Si es 360: calibra el neutro con STOP, usa 'Modo 360' y pulsa 'Guardar NVS'.\n"
-            "5. Si tienes servos 180 reales: pon 'Modo 180' y responderan al angulo fijo."
+            "- Cada servomotor recibe un angulo exacto en grados [10, 170].\n"
+            "- Angulo 90° representa el centro colineal (marcha recta).\n"
+            "- Rango seguro [10°, 170°] para proteccion mecanica de topes.\n"
+            "- Ruedas delanteras (S1, S2) viran solidarias.\n"
+            "- Ruedas traseras (S3, S4) viran en sentido contrario (viraje 4WS).\n"
+            "- Comandos aceptados: TEST:S1,ang / TEST:SERVOS_CENTRO / MOT:IZQ,pwm\n"
+            "- Watchdog Failsafe de seguridad: parada automatica tras 1000 ms."
         )
         lbl_info = tk.Label(frm_diag, text=explicacion, bg="#212433", fg="#c5d1de", font=("Consolas", 8), justify="left")
         lbl_info.pack(fill="x", padx=6, pady=(2, 6))
@@ -733,7 +662,7 @@ class MiniTesterRoverGUI:
         self.comm.enviar_texto("STOP\n")
         self.comm.enviar_texto("MOT:PARAR\n")
         self.comm.enviar_texto("TEST:SERVOS_CENTRO\n")
-        self.agregar_log("[E-STOP] Parada general de emergencia enviada (Motores STOP + Servos neutro).")
+        self.agregar_log("[E-STOP] Parada general de emergencia enviada (Motores STOP + Servos a 90).")
 
 
 def main():

@@ -1,23 +1,26 @@
 /*
  * =====================================================================================
- *  RECEPTOR ARDUINO NANO ESP32 — ROVER LUNAR V2.2-PRE (ELECTRONICA A BORDO)
- *  Soporte Completo Rocker-Bogie: 6 Motores Traccion + 4 Servos 360 con Calibracion NVS
+ *  RECEPTOR ARDUINO NANO ESP32 — ROVER LUNAR V2.2 OFICIAL (RELEASE ESTABLE)
+ *  Soporte Completo Rocker-Bogie: 6 Motores Traccion + 4 Servos con Soporte Dual 180 / 360
  * =====================================================================================
- *  Hardware: Arduino Nano ESP32 (ESP32-S3 a 3.3V) + Puente H L9110S + 4 Servomotores 360
+ *  Hardware: Arduino Nano ESP32 (ESP32-S3 a 3.3V) + Puente H L9110S + 4 Servomotores
  *  Comunicaciones soportadas:
  *    - Wi-Fi Nativo (SoftAP + UDP) [MODO ACTIVO DE LABORATORIO]
- *    - NRF24L01+ (Radiofrecuencia 2.4 GHz SPI) [Modo alternativo]
+ *    - NRF24L01+ (Radiofrecuencia 2.4 GHz SPI) [Modo de respaldo]
  *
- *  CARACTERISTICAS EXPERIMENTALES V2.2-PRE:
- *    - Calibracion en tiempo real de neutro para servos de rotacion continua MG90S 360.
- *    - Almacenamiento no volatil en memoria Flash NVS (<Preferences.h>).
- *    - Maquina de estados de pulsos temporizados para viraje no continuo simetrico.
- *    - Ajuste de direccion individual (dirS1..dirS4) e inversion global.
+ *  CARACTERISTICAS OFICIALES V2.2:
+ *    - Soporte dual configurable para servomotores:
+ *        * Modo 180 Posicional (consigna angular directa [10, 170] deg)
+ *        * Modo 360 Continuo (pulsos temporizados, ajuste de neutro en us y freno)
+ *    - Calibracion en tiempo real de neutros y persistencia no volatil en Flash NVS (<Preferences.h>).
+ *    - Temporizadores Hardware LEDC dedicados para Servos (50 Hz, 14 bits) y Traccion (1000 Hz, 8 bits).
+ *    - Telemetria automatica USB Serie ("TLM:izq,der,s1,s2,s3,s4,dt,cola").
+ *    - Watchdog failsafe automatico de parada total tras 1000 ms sin comunicacion.
+ *    - Handshake activo: "IDENT" -> "ID:NANO_ESP32:RX:v2.2"
  * =====================================================================================
  */
 
 #include <Arduino.h>
-#include <Preferences.h>
 #include "PaqueteControl.h"
 
 // ==========================================
@@ -49,11 +52,7 @@ void procesarControl(int16_t traccionIzq, int16_t traccionDer, uint8_t s1, uint8
 void procesarPaquete(const PaqueteControl& paquete);
 void pararMotores();
 void aplicarControlMotores(int16_t pwmIzq, int16_t pwmDer);
-void frenarServosNeutro();
-void actualizarPulsosDireccion360();
-void aplicarDireccion360(uint8_t s1, uint8_t s2, uint8_t s3, uint8_t s4);
-void cargarCalibracionNVS();
-void guardarCalibracionNVS();
+void centrarServos();
 void procesarComandoSerial(const String& cmd);
 void procesarTramaCsv(const String& trama);
 
@@ -172,180 +171,14 @@ bool invertirDirDer = false;   // Por defecto FALSE: lado derecho estandar
 bool invertirLogicaPwm = false;// Por defecto FALSE: logica estandar directa (0 = STOP, PWM = marcha)
 
 // ==========================================
-// CONFIGURACION Y CALIBRACION DE SERVOS (MODO DUAL 180 / 360)
+// CONTROL DIRECTO DE SERVOMOTORES DE DIRECCION (ROCKER-BOGIE 4WS)
+// Angulo seguro acotado estrictamente a [10 deg, 170 deg], centro en 90 deg.
 // ==========================================
-Preferences nvsPrefs;
-
-// Modo de operacion de los servomotores:
-// false = Servos de rotacion continua 360 (pulsos temporizados y freno a neutro en microsegundos)
-// true  = Servos posicionales estandar 180 (angulo directo [10, 170] grados via write)
-bool modoServos180 = false;
-
-// Microsegundos de neutro exacto (STOP absoluto) para cada servo (calibrables en modo 360)
-int neutroS1 = 1500;
-int neutroS2 = 1500;
-int neutroS3 = 1500;
-int neutroS4 = 1500;
-
-// Sentido individual de rotacion para cada servo (+1 o -1 segun orientacion mecanica)
-int dirS1 = 1;
-int dirS2 = 1;
-int dirS3 = -1; // Ruedas traseras rotan opuestas en 4WS
-int dirS4 = -1;
-
-// Offset de velocidad en microsegundos durante el giro temporizado
-int deltaVelGiro = 90;
-
-// Duracion del pulso temporizado en ms para alcanzar el angulo de giro (ej. ~30 deg)
-unsigned long duracionGiroMs = 140;
-
-// Inversion global de sentido del tren de direccion
-bool invertirSentidoServos = false;
-
-// Maquina de estados de direccion por pulsos temporizados
-enum EstadoDireccion {
-  DIR_CENTRO,  // Ruedas orientadas al frente
-  DIR_IZQ,     // Ruedas viradas a la izquierda
-  DIR_DER      // Ruedas viradas a la derecha
-};
-
-EstadoDireccion estadoDirActual = DIR_CENTRO;
-EstadoDireccion estadoDirObjetivo = DIR_CENTRO;
-
-bool pulsoGiroEnProgreso = false;
-unsigned long tiempoInicioPulsoGiro = 0;
-unsigned long tiempoDuracionPulsoActual = 0;
-
-void frenarServosNeutro() {
-  if (modoServos180) {
-    servo1.write(90);
-    servo2.write(90);
-    servo3.write(90);
-    servo4.write(90);
-  } else {
-    servo1.writeMicroseconds(neutroS1);
-    servo2.writeMicroseconds(neutroS2);
-    servo3.writeMicroseconds(neutroS3);
-    servo4.writeMicroseconds(neutroS4);
-  }
-  pulsoGiroEnProgreso = false;
-}
-
-void cargarCalibracionNVS() {
-  nvsPrefs.begin("rover_calib", true);
-  modoServos180 = nvsPrefs.getBool("m180", false);
-  neutroS1 = nvsPrefs.getInt("s1", 1500);
-  neutroS2 = nvsPrefs.getInt("s2", 1500);
-  neutroS3 = nvsPrefs.getInt("s3", 1500);
-  neutroS4 = nvsPrefs.getInt("s4", 1500);
-  duracionGiroMs = nvsPrefs.getULong("dur", 140);
-  deltaVelGiro = nvsPrefs.getInt("vel", 90);
-  dirS1 = nvsPrefs.getInt("ds1", 1);
-  dirS2 = nvsPrefs.getInt("ds2", 1);
-  dirS3 = nvsPrefs.getInt("ds3", -1);
-  dirS4 = nvsPrefs.getInt("ds4", -1);
-  invertirSentidoServos = nvsPrefs.getBool("inv", false);
-  nvsPrefs.end();
-
-  Serial.println(F("[NVS] Calibracion de Servos cargada desde Flash:"));
-  Serial.print(F("      Modo Servos: ")); Serial.println(modoServos180 ? F("180 POSICIONAL") : F("360 CONTINUO"));
-  Serial.print(F("      S1: ")); Serial.print(neutroS1); Serial.print(F(" us (dir=")); Serial.print(dirS1);
-  Serial.print(F(") | S2: ")); Serial.print(neutroS2); Serial.print(F(" us (dir=")); Serial.print(dirS2);
-  Serial.print(F(") | S3: ")); Serial.print(neutroS3); Serial.print(F(" us (dir=")); Serial.print(dirS3);
-  Serial.print(F(") | S4: ")); Serial.print(neutroS4); Serial.print(F(" us (dir=")); Serial.print(dirS4);
-  Serial.print(F(") | Duracion: ")); Serial.print(duracionGiroMs);
-  Serial.print(F(" ms | VelOffset: ")); Serial.print(deltaVelGiro);
-  Serial.print(F(" us | InvertirGlobal: ")); Serial.println(invertirSentidoServos ? F("SI") : F("NO"));
-}
-
-void guardarCalibracionNVS() {
-  nvsPrefs.begin("rover_calib", false);
-  nvsPrefs.putBool("m180", modoServos180);
-  nvsPrefs.putInt("s1", neutroS1);
-  nvsPrefs.putInt("s2", neutroS2);
-  nvsPrefs.putInt("s3", neutroS3);
-  nvsPrefs.putInt("s4", neutroS4);
-  nvsPrefs.putULong("dur", duracionGiroMs);
-  nvsPrefs.putInt("vel", deltaVelGiro);
-  nvsPrefs.putInt("ds1", dirS1);
-  nvsPrefs.putInt("ds2", dirS2);
-  nvsPrefs.putInt("ds3", dirS3);
-  nvsPrefs.putInt("ds4", dirS4);
-  nvsPrefs.putBool("inv", invertirSentidoServos);
-  nvsPrefs.end();
-
-  Serial.println(F("[NVS] Calibracion guardada exitosamente en memoria Flash."));
-}
-
-void ejecutarPulsoGiro(int sentido, unsigned long duracion) {
-  // sentido: -1 = hacia izquierda, +1 = hacia derecha
-  int modS1 = sentido * dirS1 * deltaVelGiro;
-  int modS2 = sentido * dirS2 * deltaVelGiro;
-  int modS3 = sentido * dirS3 * deltaVelGiro;
-  int modS4 = sentido * dirS4 * deltaVelGiro;
-
-  if (invertirSentidoServos) {
-    modS1 = -modS1;
-    modS2 = -modS2;
-    modS3 = -modS3;
-    modS4 = -modS4;
-  }
-
-  servo1.writeMicroseconds(neutroS1 + modS1);
-  servo2.writeMicroseconds(neutroS2 + modS2);
-  servo3.writeMicroseconds(neutroS3 + modS3);
-  servo4.writeMicroseconds(neutroS4 + modS4);
-
-  pulsoGiroEnProgreso = true;
-  tiempoInicioPulsoGiro = millis();
-  tiempoDuracionPulsoActual = duracion;
-}
-
-void actualizarPulsosDireccion360() {
-  if (!pulsoGiroEnProgreso) return;
-
-  if (millis() - tiempoInicioPulsoGiro >= tiempoDuracionPulsoActual) {
-    frenarServosNeutro();
-    estadoDirActual = estadoDirObjetivo;
-  }
-}
-
-void aplicarDireccion360(uint8_t s1, uint8_t s2, uint8_t s3, uint8_t s4) {
-  // En modo WASD/Ackermann:
-  // s1 > 100 indica giro a la izquierda (A = 120)
-  // s1 < 80  indica giro a la derecha (D = 60)
-  // s1 entre 80 y 100 indica posicion recta / neutro (W, S o reposo = 90)
-  EstadoDireccion objetivo = DIR_CENTRO;
-  if (s1 > 100) {
-    objetivo = DIR_IZQ;
-  } else if (s1 < 80) {
-    objetivo = DIR_DER;
-  } else {
-    objetivo = DIR_CENTRO;
-  }
-
-  if (objetivo == estadoDirActual && !pulsoGiroEnProgreso) {
-    frenarServosNeutro();
-    return;
-  }
-
-  if (pulsoGiroEnProgreso) return; // Esperar a que concluya el pulso activo
-
-  estadoDirObjetivo = objetivo;
-
-  if (estadoDirActual == DIR_CENTRO && objetivo == DIR_IZQ) {
-    ejecutarPulsoGiro(-1, duracionGiroMs);
-  } else if (estadoDirActual == DIR_IZQ && objetivo == DIR_CENTRO) {
-    ejecutarPulsoGiro(+1, duracionGiroMs);
-  } else if (estadoDirActual == DIR_CENTRO && objetivo == DIR_DER) {
-    ejecutarPulsoGiro(+1, duracionGiroMs);
-  } else if (estadoDirActual == DIR_DER && objetivo == DIR_CENTRO) {
-    ejecutarPulsoGiro(-1, duracionGiroMs);
-  } else if (estadoDirActual == DIR_IZQ && objetivo == DIR_DER) {
-    ejecutarPulsoGiro(+1, 2 * duracionGiroMs);
-  } else if (estadoDirActual == DIR_DER && objetivo == DIR_IZQ) {
-    ejecutarPulsoGiro(-1, 2 * duracionGiroMs);
-  }
+void centrarServos() {
+  servo1.write(90);
+  servo2.write(90);
+  servo3.write(90);
+  servo4.write(90);
 }
 
 unsigned long ultimaRecepcion = 0;
@@ -439,16 +272,12 @@ void procesarControl(int16_t traccionIzq, int16_t traccionDer, uint8_t s1, uint8
   unsigned long dt = (ultimaRecepcion > 0) ? (ahora - ultimaRecepcion) : 0;
   ultimaRecepcion = ahora;
 
-  // 1. Aplicar traccion y direccion segun el modo de servomotores configurado
+  // 1. Aplicar traccion y posicion angular directa de servomotores [10 deg, 170 deg]
   aplicarControlMotores(traccionIzq, traccionDer);
-  if (modoServos180) {
-    servo1.write(constrain(s1, 10, 170));
-    servo2.write(constrain(s2, 10, 170));
-    servo3.write(constrain(s3, 10, 170));
-    servo4.write(constrain(s4, 10, 170));
-  } else {
-    aplicarDireccion360(s1, s2, s3, s4);
-  }
+  servo1.write(constrain(s1, 10, 170));
+  servo2.write(constrain(s2, 10, 170));
+  servo3.write(constrain(s3, 10, 170));
+  servo4.write(constrain(s4, 10, 170));
 
   // 2. Telemetria estructurada hacia el puerto USB Serie (para HMI Debug en COM21)
   Serial.print(F("TLM:"));
@@ -491,19 +320,6 @@ void procesarComandoSerial(const String& cmd) {
     Serial.println(F("ID:NANO_ESP32:RX:v2.2"));
   } else if (cmd == "PING") {
     Serial.println(F("PONG:NANO_ESP32_OK"));
-  } else if (cmd.startsWith("MODO:SERVOS,")) {
-    int m = cmd.substring(12).toInt();
-    modoServos180 = (m == 180);
-    if (modoServos180) {
-      Serial.println(F("[MODO] Servos configurados en: MODO 180 POSICIONAL (write angulo directo)."));
-      servo1.write(90); servo2.write(90); servo3.write(90); servo4.write(90);
-    } else {
-      Serial.println(F("[MODO] Servos configurados en: MODO 360 CONTINUO (pulsos temporizados y neutro us)."));
-      frenarServosNeutro();
-    }
-  } else if (cmd == "MODO:SERVOS?" || cmd == "MODO?") {
-    Serial.print(F("[MODO] Servos actuales: "));
-    Serial.println(modoServos180 ? F("180 POSICIONAL") : F("360 CONTINUO"));
   } else if (cmd.startsWith("MOT:IZQ,")) {
     int pwm = cmd.substring(8).toInt();
     aplicarControlMotores(pwm, 0);
@@ -533,10 +349,8 @@ void procesarComandoSerial(const String& cmd) {
     Serial.println(F("[SEGURIDAD] Motores de traccion HABILITADOS."));
   } else if (cmd == "STOP" || cmd == "PARAR") {
     pararMotores();
-    frenarServosNeutro();
-    estadoDirActual = DIR_CENTRO;
-    estadoDirObjetivo = DIR_CENTRO;
-    Serial.println(F("[OK] Parada total aplicada y servos frenados en neutro."));
+    centrarServos();
+    Serial.println(F("[OK] Parada total aplicada y servos centrados a 90 grados."));
   } else if (cmd.startsWith("TEST:M_IZQ,")) {
     int pwm = cmd.substring(11).toInt();
     Serial.print(F("[TEST] Motor Izquierdo a PWM ")); Serial.print(pwm); Serial.println(F(" por 1.5s..."));
@@ -595,139 +409,36 @@ void procesarComandoSerial(const String& cmd) {
         Serial.println(F("[ERROR PIN] Pin no reconocido. Use D2, D5, D3 o D4."));
       }
     }
-  } else if (cmd.startsWith("S1") || cmd.startsWith("S2") || cmd.startsWith("S3") || cmd.startsWith("S4")) {
-    int servoNum = cmd.substring(1, 2).toInt();
-    String op = cmd.substring(2);
-    op.trim();
-    int* targetNeutro = nullptr;
-    Servo* targetServo = nullptr;
-    if (servoNum == 1) { targetNeutro = &neutroS1; targetServo = &servo1; }
-    else if (servoNum == 2) { targetNeutro = &neutroS2; targetServo = &servo2; }
-    else if (servoNum == 3) { targetNeutro = &neutroS3; targetServo = &servo3; }
-    else if (servoNum == 4) { targetNeutro = &neutroS4; targetServo = &servo4; }
-
-    if (targetNeutro && targetServo) {
-      if (op == "+" || op == "") {
-        *targetNeutro += 1;
-      } else if (op == "++") {
-        *targetNeutro += 5;
-      } else if (op == "-") {
-        *targetNeutro -= 1;
-      } else if (op == "--") {
-        *targetNeutro -= 5;
-      } else if (op.startsWith("+")) {
-        *targetNeutro += op.substring(1).toInt();
-      } else if (op.startsWith("-")) {
-        *targetNeutro -= op.substring(1).toInt();
-      } else if (op.startsWith("=") || op.startsWith(",")) {
-        *targetNeutro = op.substring(1).toInt();
-      }
-      *targetNeutro = constrain(*targetNeutro, 1000, 2000);
-      targetServo->writeMicroseconds(*targetNeutro);
-      Serial.print(F("[CALIB] S")); Serial.print(servoNum);
-      Serial.print(F(" Neutro actualizado a: ")); Serial.print(*targetNeutro);
-      Serial.println(F(" us (aplicado inmediatamente)."));
-    }
-  } else if (cmd == "GUARDAR" || cmd == "GUARDAR:CALIB" || cmd == "SAVE" || cmd == "CALIB:SAVE") {
-    guardarCalibracionNVS();
-  } else if (cmd == "VER" || cmd == "VER:CALIB" || cmd == "CALIB:VER" || cmd == "AYUDA" || cmd == "HELP") {
-    Serial.println(F("=== ESTADO ACTUAL DE CALIBRACION SERVOS ==="));
-    Serial.print(F("  Modo Servos   : ")); Serial.println(modoServos180 ? F("180 POSICIONAL (angulo directo)") : F("360 CONTINUO (pulsos/neutro)"));
-    Serial.print(F("  S1 (Del. Izq) : ")); Serial.print(neutroS1); Serial.print(F(" us | dir: ")); Serial.println(dirS1);
-    Serial.print(F("  S2 (Del. Der) : ")); Serial.print(neutroS2); Serial.print(F(" us | dir: ")); Serial.println(dirS2);
-    Serial.print(F("  S3 (Tras. Izq): ")); Serial.print(neutroS3); Serial.print(F(" us | dir: ")); Serial.println(dirS3);
-    Serial.print(F("  S4 (Tras. Der): ")); Serial.print(neutroS4); Serial.print(F(" us | dir: ")); Serial.println(dirS4);
-    Serial.print(F("  Duracion Pulso: ")); Serial.print(duracionGiroMs); Serial.println(F(" ms"));
-    Serial.print(F("  Velocidad Giro: ")); Serial.print(deltaVelGiro); Serial.println(F(" us offset"));
-    Serial.print(F("  Invertir Global: ")); Serial.println(invertirSentidoServos ? F("SI") : F("NO"));
-    Serial.println(F("Comandos disponibles:"));
-    Serial.println(F("  S1+, S1-, S1++, S1--, S1=1510 (ajuste fino de neutro)"));
-    Serial.println(F("  INVS1, INVS2, INVS3, INVS4 (invierte sentido de giro del servo)"));
-    Serial.println(F("  DUR,140 (fija duracion de pulso en ms)"));
-    Serial.println(F("  VEL,90 (fija offset de velocidad en us)"));
-    Serial.println(F("  TEST:IZQ / TEST:DER / TEST:CENTRO (prueba movimiento de viraje)"));
-    Serial.println(F("  GUARDAR (guarda en memoria flash NVS permanente)"));
-    Serial.println(F("==============================================="));
-  } else if (cmd == "INVS1") {
-    dirS1 = -dirS1;
-    Serial.print(F("[CALIB] dirS1 invertido a: ")); Serial.println(dirS1);
-  } else if (cmd == "INVS2") {
-    dirS2 = -dirS2;
-    Serial.print(F("[CALIB] dirS2 invertido a: ")); Serial.println(dirS2);
-  } else if (cmd == "INVS3") {
-    dirS3 = -dirS3;
-    Serial.print(F("[CALIB] dirS3 invertido a: ")); Serial.println(dirS3);
-  } else if (cmd == "INVS4") {
-    dirS4 = -dirS4;
-    Serial.print(F("[CALIB] dirS4 invertido a: ")); Serial.println(dirS4);
-  } else if (cmd == "INV:SERVOS" || cmd == "INV:DIR") {
-    invertirSentidoServos = !invertirSentidoServos;
-    Serial.print(F("[CALIB] Inversion global de servos: "));
-    Serial.println(invertirSentidoServos ? F("ACTIVADA") : F("DESACTIVADA"));
-  } else if (cmd.startsWith("DUR,") || cmd.startsWith("CALIB:DUR,")) {
-    int idx = cmd.indexOf(',');
-    duracionGiroMs = cmd.substring(idx + 1).toInt();
-    Serial.print(F("[CALIB] Duracion de pulso de giro fijada a: ")); Serial.print(duracionGiroMs); Serial.println(F(" ms"));
-  } else if (cmd.startsWith("VEL,") || cmd.startsWith("CALIB:VEL,")) {
-    int idx = cmd.indexOf(',');
-    deltaVelGiro = cmd.substring(idx + 1).toInt();
-    Serial.print(F("[CALIB] Offset de velocidad de giro fijado a: ")); Serial.print(deltaVelGiro); Serial.println(F(" us"));
-  } else if (cmd.startsWith("NEUTRO,")) {
-    int p1 = cmd.indexOf(',', 7);
-    int p2 = (p1 > 0) ? cmd.indexOf(',', p1 + 1) : -1;
-    int p3 = (p2 > 0) ? cmd.indexOf(',', p2 + 1) : -1;
-    if (p1 > 0 && p2 > 0 && p3 > 0) {
-      neutroS1 = constrain(cmd.substring(7, p1).toInt(), 1000, 2000);
-      neutroS2 = constrain(cmd.substring(p1 + 1, p2).toInt(), 1000, 2000);
-      neutroS3 = constrain(cmd.substring(p2 + 1, p3).toInt(), 1000, 2000);
-      neutroS4 = constrain(cmd.substring(p3 + 1).toInt(), 1000, 2000);
-      frenarServosNeutro();
-      Serial.println(F("[CALIB] 4 Neutros fijados y aplicados."));
-    }
-  } else if (cmd == "TEST:IZQ" || cmd == "IZQ") {
-    Serial.println(F("[TEST] Ejecutando pulso viraje hacia IZQUIERDA..."));
-    ejecutarPulsoGiro(-1, duracionGiroMs);
-  } else if (cmd == "TEST:DER" || cmd == "DER") {
-    Serial.println(F("[TEST] Ejecutando pulso viraje hacia DERECHA..."));
-    ejecutarPulsoGiro(+1, duracionGiroMs);
-  } else if (cmd == "TEST:CENTRO" || cmd == "CENTRO") {
-    frenarServosNeutro();
-    estadoDirActual = DIR_CENTRO;
-    estadoDirObjetivo = DIR_CENTRO;
-    Serial.println(F("[TEST] Servos frenados en neutro y reiniciados a CENTRO."));
   } else if (cmd.startsWith("TEST:S1,")) {
-    int val = cmd.substring(8).toInt();
-    if (val > 500) servo1.writeMicroseconds(val);
-    else servo1.write(val);
-    Serial.print(F("[TEST] Servo 1 a ")); Serial.println(val);
+    int ang = constrain(cmd.substring(8).toInt(), 10, 170);
+    servo1.write(ang);
+    Serial.print(F("[TEST] Servo 1 a ")); Serial.print(ang); Serial.println(F(" grados."));
   } else if (cmd.startsWith("TEST:S2,")) {
-    int val = cmd.substring(8).toInt();
-    if (val > 500) servo2.writeMicroseconds(val);
-    else servo2.write(val);
-    Serial.print(F("[TEST] Servo 2 a ")); Serial.println(val);
+    int ang = constrain(cmd.substring(8).toInt(), 10, 170);
+    servo2.write(ang);
+    Serial.print(F("[TEST] Servo 2 a ")); Serial.print(ang); Serial.println(F(" grados."));
   } else if (cmd.startsWith("TEST:S3,")) {
-    int val = cmd.substring(8).toInt();
-    if (val > 500) servo3.writeMicroseconds(val);
-    else servo3.write(val);
-    Serial.print(F("[TEST] Servo 3 a ")); Serial.println(val);
+    int ang = constrain(cmd.substring(8).toInt(), 10, 170);
+    servo3.write(ang);
+    Serial.print(F("[TEST] Servo 3 a ")); Serial.print(ang); Serial.println(F(" grados."));
   } else if (cmd.startsWith("TEST:S4,")) {
-    int val = cmd.substring(8).toInt();
-    if (val > 500) servo4.writeMicroseconds(val);
-    else servo4.write(val);
-    Serial.print(F("[TEST] Servo 4 a ")); Serial.println(val);
-  } else if (cmd == "TEST:SERVOS_CENTRO") {
-    frenarServosNeutro();
-    Serial.println(F("[TEST] Servos frenados en su valor neutro calibrado."));
-  } else if (cmd == "TEST:SWEEP") {
-    Serial.println(F("[TEST] Viraje Izquierda (140 ms) -> Neutro -> Viraje Derecha (140 ms) -> Neutro"));
-    ejecutarPulsoGiro(-1, duracionGiroMs);
-    delay(duracionGiroMs + 500);
-    frenarServosNeutro();
-    delay(500);
-    ejecutarPulsoGiro(+1, duracionGiroMs);
-    delay(duracionGiroMs + 500);
-    frenarServosNeutro();
-    Serial.println(F("[TEST] Prueba de viraje completada."));
+    int ang = constrain(cmd.substring(8).toInt(), 10, 170);
+    servo4.write(ang);
+    Serial.print(F("[TEST] Servo 4 a ")); Serial.print(ang); Serial.println(F(" grados."));
+  } else if (cmd == "TEST:SERVOS_CENTRO" || cmd == "CENTRO") {
+    centrarServos();
+    Serial.println(F("[TEST] Todos los servos centrados a 90 grados."));
+  } else if (cmd == "VER" || cmd == "AYUDA" || cmd == "HELP") {
+    Serial.println(F("=== ESTADO RECEPTOR ARDUINO NANO ESP32 ==="));
+    Serial.println(F("  Traccion: Pines D2, D5 (Izq) | D3, D4 (Der)"));
+    Serial.println(F("  Servos  : S1(D6), S2(D7), S3(D8), S4(A0) [10-170 deg, centro 90]"));
+    Serial.println(F("  Comandos disponibles:"));
+    Serial.println(F("    TEST:S1,ang .. TEST:S4,ang (posiciona servo a 10-170 grados)"));
+    Serial.println(F("    TEST:SERVOS_CENTRO (centra los 4 servos a 90 grados)"));
+    Serial.println(F("    MOT:IZQ,pwm / MOT:DER,pwm / MOT:PARAR (control continuo de traccion)"));
+    Serial.println(F("    TEST:PIN_RAW,pin,pwm (prueba pin individual D2, D5, D3, D4)"));
+    Serial.println(F("    STOP (parada total inmediata de motores y servos a 90)"));
+    Serial.println(F("==========================================="));
   }
 }
 
@@ -785,9 +496,8 @@ void setup() {
   servo3.attach(pinServo3);
   servo4.attach(pinServo4);
 
-  // Cargar calibracion de neutros y parametros NVS desde memoria Flash y frenar inmediatamente
-  cargarCalibracionNVS();
-  frenarServosNeutro();
+  // Inicializacion y centrado seguro de servomotores a 90 grados
+  centrarServos();
 
 #if MODO_CONEXION_WIFI
   // Inicializacion del enlace Wi-Fi SoftAP
@@ -825,9 +535,6 @@ void setup() {
 }
 
 void loop() {
-  // Actualizar temporizacion no bloqueante de viraje de servos 360
-  actualizarPulsosDireccion360();
-
 #if MODO_CONEXION_WIFI
   // Deteccion de paquetes entrantes por socket Wi-Fi UDP
   int tamanoPaquete = udp.parsePacket();
@@ -871,7 +578,7 @@ void loop() {
   // Watchdog Failsafe de Seguridad: Parada si transcurre mas de 1 seg sin paquete
   if (millis() - ultimaRecepcion > TIMEOUT_MS) {
     pararMotores();
-    frenarServosNeutro();
+    centrarServos();
     if (millis() - ultimoAvisoFailsafe > 1000) {
       ultimoAvisoFailsafe = millis();
       Serial.println(F("TLM:FAILSAFE,0,90,90,90,90,1000,0"));
