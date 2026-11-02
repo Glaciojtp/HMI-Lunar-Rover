@@ -2,7 +2,7 @@
 title Compilador HMI Rover Lunar a Ejecutable Windows (.EXE)
 cd /d "%~dp0"
 echo ========================================================
-echo   🛰️ COMPILADOR DE HMI ROVER LUNAR V2.0 A .EXE STANDALONE
+echo   COMPILADOR DE HMI ROVER LUNAR V2.1 A .EXE STANDALONE
 echo   (Genera un archivo ejecutable apto para cualquier PC)
 echo ========================================================
 echo.
@@ -46,10 +46,10 @@ if errorlevel 1 (
 
 :: 3. Compilar la HMI a un único ejecutable
 echo.
-echo [2/3] Compilando HMI_Rover_V2.py en un unico archivo .EXE...
+echo [2/3] Compilando HMI_Rover_V2_1.py en un unico archivo .EXE...
 echo (Este proceso puede demorar entre 30 y 60 segundos, por favor espera...)
 cd /d "%~dp001_Oficial\HMI"
-%PY_CMD% -m PyInstaller --clean --noconsole --onefile --name "HMI_Rover_Lunar_V2" HMI_Rover_V2.py
+%PY_CMD% -m PyInstaller --clean --noconsole --onefile --name "HMI_Rover_Lunar_V2" HMI_Rover_V2_1.py
 
 if errorlevel 1 (
     echo.

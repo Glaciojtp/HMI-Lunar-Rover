@@ -258,3 +258,43 @@ Cualquier agente que proponga cambios o refactorizaciones debe:
 3. **Mantener los límites de seguridad de actuadores:** No programar valores angulares fuera de `[10, 170]` grados y conservar la rutina de parada en caso de pérdida de enlace (`TIMEOUT_MS = 1000`).
 4. **Conservar las frecuencias asignadas:** Mantener el canal RF en 108 a 250 kbps a menos que se realice una reconfiguración coordinada de radio en ambos firmwares.
 5. **Cero uso de emojis (Regla Estricta):** Queda terminantemente prohibido utilizar emojis en explicaciones, comentarios, documentación, commits o respuestas. El usuario detesta los emojis; utilizar únicamente texto sobrio, formal y directo.
+6. **Politica Obligatoria de Versionado (Beta -> Pre-Release -> Release):** Nunca realizar modificaciones experimentales directamente sobre los archivos estables de `01_Oficial/`. Todo cambio debe transitar obligatoriamente por el flujo:
+   - **Fase Beta:** Cambios experimentales, pruebas unitarias y bancos de prueba en `02_Debug_y_Pruebas/` o con sufijo `_beta`. Registro obligatorio en [`CHANGELOG.md`](CHANGELOG.md).
+   - **Fase Pre-Release:** Consolidacion de componentes validados funcionalmente en banco (ej. `v2.2-pre`).
+   - **Fase Release:** Promocion formal a produccion estable en `01_Oficial/` unicamente cuando la actualizacion completa este validada y aprobada por el usuario.
+7. **Protocolo de Continuidad de Sesion (Context Handover):** Al iniciar cualquier conversacion nueva o tras sesiones extensas, el agente debe consultar [`HANDOVER_SESION.md`](HANDOVER_SESION.md) y [`CHANGELOG.md`](CHANGELOG.md) para sincronizar inmediatamente el estado del proyecto sin perdida de informacion. Al completar cambios significativos, se deben actualizar ambos archivos.
+
+---
+
+## 9. Politica de Ciclo de Vida y Versionado
+
+Cualquier modificacion en el repositorio (firmwares de Arduino/ESP32, interfaces Python HMI, modulos de debug o el stack nativo en Rust) debe seguir el ciclo estricto de maduracion:
+
+```text
+[Desarrollo / Feature / Fix]
+          │
+          ▼
+   ┌──────────────┐
+   │  FASE BETA   │  --> Mini-versiones beta y ramas de prueba en 02_Debug_y_Pruebas/
+   └──────┬───────┘      Registro obligatorio de cambios en CHANGELOG.md
+          │
+          ▼  (Validacion funcional en hardware y bancos de prueba)
+   ┌──────────────┐
+   │ PRE-RELEASE  │  --> Consolidacion multi-subsistema (ej. v2.1-pre, v2.2-pre)
+   └──────┬───────┘      Verificacion de interoperabilidad HMI <-> TX <-> RX
+          │
+          ▼  (Hito completo y aprobado sin regresiones)
+   ┌──────────────┐
+   │   RELEASE    │  --> Despliegue formal en 01_Oficial/ (ej. v2.1 Oficial Estable)
+   └──────────────┘      Actualizacion de lanzadores (Lanzar_HMI_Rover.bat, etc.)
+```
+
+---
+
+## 10. Protocolo de Traspaso de Sesion (Context Handover)
+
+Para mitigar el consumo excesivo de tokens y la degradacion de contexto en conversaciones largas con la IA:
+1. **Archivo Maestro:** [`HANDOVER_SESION.md`](HANDOVER_SESION.md) contiene la fotografia completa del estado del hardware, pinouts, puertos USB, bugs resueltos, versiones activas y tareas inmediatas.
+2. **Procedimiento para Nuevas Conversaciones:** El usuario puede iniciar una nueva sesion solicitando simplemente: *"Lee HANDOVER_SESION.md y continuemos con [tarea]"*. El agente cargara de inmediato todo el contexto tecnico sin necesidad de reexplicar antecedentes ni perder configuraciones previas.
+3. **Mantenimiento:** Cada agente que concluya un bloque de trabajo relevante debe actualizar [`HANDOVER_SESION.md`](HANDOVER_SESION.md) y [`CHANGELOG.md`](CHANGELOG.md) antes de cerrar su intervencion.
+

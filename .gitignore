@@ -47,6 +47,7 @@ Thumbs.db
 ehthumbs.db
 Desktop.ini
 $RECYCLE.BIN/
+*.lnk
 
 # Arduino build artifacts
 *.hex

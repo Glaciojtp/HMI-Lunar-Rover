@@ -24,7 +24,20 @@
 
 ## Historial de Versiones
 
-### [v2.2.0-pre] - 2026-10-04 (Pre-Release Experimental Activa)
+### [v2.3.0-pre] - 2026-10-06 (Pre-Release Servos Posicionales Estandar)
+
+#### Modificado y Corregido
+- **Firmware Receptor Nano ESP32 (`02_Debug_y_Pruebas/Firmware_v2_3_pre/`):**
+  - Eliminacion radical del sistema de calibracion de neutros variables en microsegundos y la maquina de estados de pulsos temporizados (`duracionGiroMs`, `deltaVelGiro`, `ejecutarPulsoGiro()`).
+  - Retorno estricto al control angular absoluto directo [10, 170] grados para servomotores posicionales estandar (180 deg) mediante `servo.write(angulo)`.
+  - Posicion central neutra fija y estandar a 90 grados exactos en reposo y en el lazo de seguridad failsafe.
+  - Supresion de escrituras continuas e innecesarias de nuevas posiciones neutras a memoria Flash NVS.
+- **Firmware Transmisor Nano ESP32 (`02_Debug_y_Pruebas/Firmware_v2_3_pre/` y `02_Debug_y_Pruebas/Firmware_Debug/`):**
+  - Actualizacion de puente USB-PC sin joysticks con soporte dual Wi-Fi UDP y NRF24L01+ SPI.
+  - Transmision angular directa de consignas en grados para S1..S4.
+  - Handshake activo: `IDENT` -> `ID:NANO_ESP32:TX:v2.3`.
+
+### [v2.2.0-pre] - 2026-10-04 (Pre-Release Experimental Historica)
 
 #### Agregado
 - **Firmware Receptor Nano ESP32 (`02_Debug_y_Pruebas/Firmware_v2_2_pre/`):**

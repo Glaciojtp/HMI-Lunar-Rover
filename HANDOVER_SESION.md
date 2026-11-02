@@ -16,7 +16,8 @@ Se aplica de manera obligatoria el ciclo: **Beta -> Pre-Release -> Release Ofici
 | Nivel de Version | Estado | Componentes Asociados | Ubicacion de Archivos |
 |---|---|---|---|
 | **v2.1 Oficial (Release Estable)** | **PRODUCCION ACTIVA** | - Ejecutor Arduino Nano ESP32<br>- Transmisor ESP32-C3<br>- HMI de Pilotaje Python v2.1 | [`01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32/`](01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32/)<br>[`01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado/`](01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado/)<br>[`01_Oficial/HMI/HMI_Rover_V2_1.py`](01_Oficial/HMI/HMI_Rover_V2_1.py) |
-| **v2.2-PRE (Pre-Release Experimental)** | **EN DESARROLLO** | - Ejecutor Nano ESP32 con calibracion NVS de neutro y pulsos de viraje para servos 360<br>- Transmisor Nano ESP32 Wi-Fi UDP (Dongle PC sin joystick)<br>- HMI v2.2-PRE | [`02_Debug_y_Pruebas/Firmware_v2_2_pre/Ejecutor_ArduinoNano_ESP32_v2_2_pre/`](02_Debug_y_Pruebas/Firmware_v2_2_pre/Ejecutor_ArduinoNano_ESP32_v2_2_pre/)<br>[`02_Debug_y_Pruebas/Firmware_v2_2_pre/Transmisor_ArduinoNano_ESP32_v2_2_pre/`](02_Debug_y_Pruebas/Firmware_v2_2_pre/Transmisor_ArduinoNano_ESP32_v2_2_pre/)<br>[`01_Oficial/HMI/HMI_Rover_V2_2_pre.py`](01_Oficial/HMI/HMI_Rover_V2_2_pre.py) |
+| **v2.3-PRE (Pre-Release Activa)** | **EN DESARROLLO** | - Ejecutor Nano ESP32 con control angular directo normal [10, 170] deg (sin neutros variables ni pulsos 360)<br>- Transmisor Nano ESP32 dual WiFi/NRF24 sin joystick (Dongle USB puro)<br>- Trama estricta de 8 bytes y failsafe con centrado a 90 deg | [`02_Debug_y_Pruebas/Firmware_v2_3_pre/Ejecutor_ArduinoNano_ESP32_v2_3_pre/`](02_Debug_y_Pruebas/Firmware_v2_3_pre/Ejecutor_ArduinoNano_ESP32_v2_3_pre/)<br>[`02_Debug_y_Pruebas/Firmware_v2_3_pre/Transmisor_ArduinoNano_ESP32_v2_3_pre/`](02_Debug_y_Pruebas/Firmware_v2_3_pre/Transmisor_ArduinoNano_ESP32_v2_3_pre/) |
+| **v2.2-PRE (Pre-Release Historica)** | **ARCHIVADA** | - Ensayos experimentales previos con servos continuos 360 | [`02_Debug_y_Pruebas/Firmware_v2_2_pre/`](02_Debug_y_Pruebas/Firmware_v2_2_pre/) |
 | **Mini-Versiones Beta** | **LABORATORIO** | - Modulos de prueba unitaria, scripts de test y bancos de diagnostico | [`02_Debug_y_Pruebas/`](02_Debug_y_Pruebas/) |
 | **Stack Paralelo en Rust** | **HOJA DE RUTA** | - GUI nativa egui + protocolos no_std | `C:\Users\joaqu\Desktop\HMI-Lunar-Rover-Rust/` |
 
@@ -56,11 +57,14 @@ Se aplica de manera obligatoria el ciclo: **Beta -> Pre-Release -> Release Ofici
   3. **Riel Logica (Arduino):** Bateria -> Diodo Schottky (1N5819 o SS34) -> Pin `VIN` del Arduino + capacitor de 470 uF en `VIN`. El diodo actua como UPS local e impide que los motores drenen el capacitor del Arduino.
   4. **Tierra Comun (GND):** Todos los negativos unidos en un unico punto estrella.
 
-### B. Por que los Servos 360 siguen girando mientras se mantiene apretada la tecla "D"
-- Los servos MG90S 360 no tienen potenciometro interno de posicion; el ancho del pulso controla **velocidad y sentido de rotacion continua** (no angulo).
-- Mientras se mantiene presionada una tecla (`D`), la HMI emite continuamente paquetes a 20 Hz con `s1=60` (~1166 us).
-- Como 1166 us < 1500 us de neutro, el motor interno recibe la orden de rotar continuamente a velocidad fija hasta que se suelta la tecla y la HMI envia 90° (~1500 us).
-- En la version experimental **v2.2-PRE**, este comportamiento se resuelve con una maquina de estados de pulsos temporizados (`duracionGiroMs = 140 ms`) que corta a neutro exacto al terminar el pulso.
+### B. Retorno a Servomotores Posicionales Estandar (Eliminacion de Neutros Dinamicos 360)
+- En versiones experimentales previas (`v2.2-PRE`), se implemento un sistema complejo de calibracion de microsegundos de neutro (`neutroS1..S4`), pulsos temporizados (`duracionGiroMs`) y persistencia NVS para intentar controlar servomotores de rotacion continua 360.
+- Esto introducia deriva constante, generaba "nuevas" posiciones neutras imprevistas y provocaba movimientos continuos e inestables al presionar teclas de viraje.
+- **Resolucion Definitiva en v2.3-PRE y Release Oficial:**
+  1. Se eliminaron por completo las variables de neutro en microsegundos, los comandos de ajuste dinámico (`S1+`, `S1-`, etc.) y las maquinas de estados temporizadas.
+  2. Los actuadores operan como **servomotores normales de posicion angular directa** (180 grados, SG90 / MG90S con potenciometro interno de lazo cerrado).
+  3. Cada trama de control asigna directamente los angulos mediante `servo.write(constrain(angulo, 10, 170))`.
+  4. La posicion central neutra es fija, univoca y mecanicamente segura a **90 grados exactos**, aplicandose de forma inmediata en reposo, comandos de parada (STOP) y por desconexion (watchdog failsafe).
 
 ---
 

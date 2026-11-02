@@ -1,9 +1,9 @@
 @echo off
-title HMI Rover Lunar V2.0 — Lanzador Inteligente Windows
+title HMI Rover Lunar V2.1 Oficial — Lanzador Windows
 cd /d "%~dp0"
 
 echo ========================================================
-echo   🛰️ HMI ROVER LUNAR V2.0 — INICIANDO SISTEMA
+echo   HMI ROVER LUNAR V2.1 OFICIAL — INICIANDO SISTEMA
 echo ========================================================
 echo.
 
@@ -66,7 +66,7 @@ if errorlevel 1 (
 )
 
 :: 5. Iniciar la interfaz HMI
-echo [OK] Iniciando HMI_Rover_V2.py...
+echo [OK] Iniciando HMI_Rover_V2_1.py (Release Oficial)...
 cd /d "%~dp001_Oficial\HMI"
-start "" %PY_CMD% HMI_Rover_V2.py
+start "" %PY_CMD% HMI_Rover_V2_1.py
 exit /b 0
