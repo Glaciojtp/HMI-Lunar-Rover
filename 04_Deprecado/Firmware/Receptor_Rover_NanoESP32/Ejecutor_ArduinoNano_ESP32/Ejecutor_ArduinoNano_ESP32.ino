@@ -601,4 +601,7 @@ void loop() {
       }
     }
   }
+
+  // Ceder tiempo al planificador de FreeRTOS para alimentar el Task Watchdog y estabilizar consumo
+  delay(2);
 }

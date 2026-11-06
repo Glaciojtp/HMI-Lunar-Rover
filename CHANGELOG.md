@@ -7,22 +7,59 @@
 
 ---
 
-## Politica de Ciclo de Vida del Software
+## Politica
 
-1. **Fase Beta (Desarrollo Activo y Pruebas Unitarias):**
-   - Todo cambio experimental, nueva funcion o correccion de errores se desarrolla inicialmente como una mini-version o rama `beta`.
-   - Se realizan pruebas en banco de trabajo y se documenta cada modificacion en la bitacora de cambios.
-   - Los archivos experimentales se ubican en `02_Debug_y_Pruebas/` o se identifican con sufijo `_beta`.
-2. **Fase Pre-Release (Validacion Integral de Subsistemas):**
-   - Una vez que la serie de cambios beta demuestra estabilidad funcional en hardware real y supera los tests unitarios, se consolida en una `pre-release` (ej. `v2.2-pre`).
-   - Se evalua la interoperabilidad entre HMI (Python/Rust), Transmisor y Receptor en condiciones combinadas de traccion, direccion y telemetria.
-3. **Fase Release Oficial (Produccion y Despliegue Estable):**
-   - Al completarse todos los objetivos planificados del hito y verificarse la ausencia de regresiones, la pre-release se formaliza como `release` oficial definitiva (ej. `v2.1`, `v2.2`).
-   - Los archivos de produccion se ubican exclusivamente en `01_Oficial/` y se actualizan los lanzadores inteligentes (`Lanzar_HMI_Rover.bat`, `Compilar_HMI_a_EXE.bat`).
+Un solo archivo activo por pieza, editado en el lugar. Los experimentos van en ramas de git. Ver `AGENTS.md`. Esta politica reemplaza al ciclo Beta, Pre-Release y Release basado en copias de archivos.
 
 ---
 
 ## Historial de Versiones
+
+### [v3.1] - 2026-11-06 (logica verificada en PC, mando pendiente de prueba en el rover)
+
+#### HMI
+- Direccion y traccion separadas. `A`, `D`, `Q` y `E` solo orientan las ruedas y no mueven los motores. Solo `W` y `S` mueven los motores, sobre la orientacion elegida.
+- Pivote: `Q` + `W` gira en el lugar a la izquierda, `E` + `W` a la derecha. Con `S`, al reves.
+- `W` y `S` juntas se anulan. Prioridad de direccion: `Q`, `E`, `A`, `D`.
+- La etiqueta del mando combina traccion y direccion (por ejemplo `AVANCE + IZQUIERDA`).
+
+#### Firmware
+- Ejecutor: L9110S pasa a ser el puente H por defecto (`PUENTE_H_L298N 0`): la PCB tiene 3 modulos dobles en paralelo. Con L298N quedaban 3 salidas en 0 V. L298N sigue disponible y se puede elegir al compilar.
+- Ejecutor: `INVERTIR_IZQ` e `INVERTIR_DER` en true, validado en el rover (con false avanzaba al reves).
+- Sin cambios de protocolo: los firmwares siguen informando v3.0 y son compatibles con esta HMI.
+
+#### Pruebas
+- El banco de firmware compila el ejecutor en las dos variantes de puente H y toma la inversion de giro del propio `.ino`. Pruebas nuevas para L9110S: pines por sentido, pivote, rampa e inversion por cero sin activar los dos pines a la vez.
+- Pruebas de cinematica reescritas para el mando nuevo.
+
+#### Release
+- `.github/workflows/release.yml`: al subir una etiqueta `v*` genera `HMI_Rover.exe`, `HMI_Rover_Debug.exe` y los `.bin` de los firmwares, verifica que cada `.exe` arranque y crea la release como borrador. En los PR solo genera los archivos.
+- README: seccion para descargar y usar el rover sin instalar nada.
+
+#### Estado
+- v3.0 probada en el rover por el equipo: funciona con L9110S.
+
+### [v3.0] - 2026-11-02 (compila y logica verificada en PC, pendiente de hardware)
+
+#### Reorganizacion
+- Sistema activo reducido a cuatro archivos en `01_Oficial/`: firmware del transmisor, firmware del ejecutor, HMI normal y HMI debug.
+- `04_Legacy_y_Versiones_Previas/`, `02_Debug_y_Pruebas/` y el resto de versiones pasan a `04_Deprecado/`, con indice.
+- Rust, LiDAR y joystick pasan a `05_Futuro/`.
+- README (con estado actual y capturas de las HMI), AGENTS y esquematico reescritos. `tests/test_estructura.py` hace cumplir la regla.
+
+#### Firmware
+- El transmisor es el Access Point; el ejecutor es estacion con canal e IP fijos.
+- Protocolo UDP nuevo con secuencia, CRC-8 y telemetria de retorno, incluida la causa del ultimo reinicio.
+- Ejecutor: rampas de PWM, inversion por cero, arranque desfasado, servos escalonados, fases por canal en el PCA9685, arranque por etapas, potencia WiFi reducida y salida USB no bloqueante.
+- Ejecutor: PCA9685 para servos, L298N por defecto, L9110S seleccionable. Pines corregidos para Nano ESP32.
+- Transmisor: envio a 20 Hz fijos y parada si la HMI deja de enviar durante 500 ms.
+
+#### HMI
+- `HMI_Rover.py`: envio continuo a 20 Hz en hilo propio, signos reales, cadena de senales de conexion, alerta de reinicio, reconexion USB y parada al perder el foco.
+- `HMI_Rover_Debug.py`: dos placas a la vez, comparacion por secuencia, graficas de enviado, recibido y aplicado, marcas de reinicio, perfiles de prueba y exportacion CSV.
+- Se retiran el flasheo integrado, los perfiles de hardware, la calibracion NVS, el modo de servos 360 y la telemetria de joystick.
+
+---
 
 ### [v2.3.0-pre] - 2026-10-06 (Pre-Release Servos Posicionales Estandar)
 

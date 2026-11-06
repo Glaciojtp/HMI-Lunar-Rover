@@ -1,252 +1,317 @@
-# ROVER LUNAR V2.0 — PLATAFORMA ROBOTICA ROCKER-BOGIE
+<div align="center">
 
-> **Repositorio Oficial de Firmware, Control y Software de Estacion Terrena (HMI)**  
-> Desarrollado para la mision analoga de exploracion lunar y aplicaciones industriales terrestres en mineria subterranea e inspeccion en espacios confinados.  
-> **Equipo CEPIT:** Joaquin, Lucas, Lucio, Sebastian, Emir, Benjamin, Keila y Ainsworth.
+# Rover Lunar
 
----
+**Rover de exploración Rocker-Bogie 6x6 con dirección en las 4 esquinas, manejado desde una PC por WiFi**
 
-## Tabla de Contenidos
-1. [Vision General del Proyecto](#vision-general-del-proyecto)
-2. [Arquitectura de Integracion del Sistema](#arquitectura-de-integracion-del-sistema)
-3. [Catalogo de Firmwares (.ino) y Microcontroladores](#catalogo-de-firmwares-ino-y-microcontroladores)
-   - [Mando de Radiocontrol Fisico Autonomo](#1-mando-de-radiocontrol-fisico-autonomo-emisor)
-   - [Modulo Transmisor PC / Puente RF](#2-modulo-transmisor-pc--puente-serie-rf-emisor)
-   - [Electronica de a Bordo del Rover (Ultima Version Oficial)](#3-electronica-de-a-bordo-del-rover-receptor---version-oficial)
-   - [Electronica de a Bordo del Rover (Version Previa MKR)](#4-electronica-de-a-bordo-del-rover-receptor---version-previa-mkr)
-4. [Guia Paso a Paso para Instalar y Flashear cada .ino](#guia-paso-a-paso-para-instalar-y-flashear-cada-ino)
-5. [Software HMI de Estacion Terrena (Windows)](#software-hmi-de-estacion-terrena-windows)
-6. [Reglas Criticas de Seguridad y Lecciones de Hardware](#reglas-criticas-de-seguridad-y-lecciones-de-hardware)
-7. [Estructura del Repositorio](#estructura-del-repositorio)
-8. [Documentacion Tecnica Detallada](#documentacion-tecnica-detallada)
+![Versión](https://img.shields.io/badge/versi%C3%B3n-v3.1-2a78d6)
+![Pruebas en PC](https://img.shields.io/badge/pruebas%20en%20PC-pasan-1baf7a)
+![Compilación ESP32](https://img.shields.io/badge/compilaci%C3%B3n%20ESP32-pasa-1baf7a)
+![Hardware](https://img.shields.io/badge/prueba%20en%20el%20rover-funciona-1baf7a)
 
----
+[Descargar](#descargar-sin-instalar-nada) ·
+[Estado actual](#estado-actual) ·
+[Cómo funciona](#cómo-funciona) ·
+[Conexión](#cómo-se-hace-la-conexión) ·
+[Interfaz gráfica](#interfaz-gráfica) ·
+[Puesta en marcha](#puesta-en-marcha) ·
+[Alimentación](#alimentación-y-reinicios)
 
-## Vision General del Proyecto
+*Equipo CEPIT: Joaquín, Lucas, Lucio, Sebastián, Emir, Benjamín, Keila y Ainsworth*
 
-El **Rover Lunar V2.0** es un vehículo robótico de exploración móvil diseñado para superar terrenos altamente agrestes, pendientes de hasta 20° y regolito simulado mediante una suspensión mecánica de tipo **Rocker-Bogie** con:
-* **Tracción 6x6:** Seis motores de corriente continua con caja reductora coordinados mediante un puente H doble L9110S.
-* **Dirección 4WS (Four-Wheel Steering):** Cuatro servomotores independientes ubicados en las esquinas para maniobras de precisión (geometría Ackermann, giro sobre el propio eje en 360° y desplazamiento diagonal tipo cangrejo).
-* **Enlace de Radiofrecuencia de Alta Confiabilidad:** Transmisión a 2.4 GHz mediante módulos NRF24L01+ configurados en el canal 108 (2.508 GHz, inmune a interferencias de Wi-Fi doméstico) con paquetes binarios compactos de 6 y 8 bytes.
+</div>
 
 ---
 
-## Arquitectura de Integración del Sistema
+## Descargar sin instalar nada
+
+En la [última release](https://github.com/Glaciojtp/HMI-Lunar-Rover/releases/latest) están los programas listos para Windows. No hace falta instalar Python ni ninguna biblioteca.
+
+| Archivo | Para qué |
+|---|---|
+| [`HMI_Rover.exe`](https://github.com/Glaciojtp/HMI-Lunar-Rover/releases/latest/download/HMI_Rover.exe) | Manejar el rover. Es lo único que hace falta si las placas ya están cargadas |
+| [`HMI_Rover_Debug.exe`](https://github.com/Glaciojtp/HMI-Lunar-Rover/releases/latest/download/HMI_Rover_Debug.exe) | Banco de pruebas con las dos placas conectadas a la PC |
+| `Firmwares_NanoESP32.zip` | Opcional. Los dos firmwares, para volver a grabar las placas con Arduino IDE. Las placas del rover ya tienen la última versión |
+
+1. Descargar `HMI_Rover.exe` y abrirlo. Windows puede avisar que es un programa no firmado: **Más información** y después **Ejecutar de todas formas**.
+2. Encender el rover y conectar el transmisor por USB.
+3. Elegir el puerto, tocar **CONECTAR** y manejar con el teclado ([controles](#hmi-normal)).
+
+---
+
+## Estado actual
+
+*Actualizado: 6 de noviembre de 2026.*
+
+La **v3.0** reorganizó el proyecto y atacó los reinicios del ejecutor por software. **Ya se probó en el rover y funciona**, con puente H **L9110S**. La **v3.1** separa dirección y tracción en el mando: las teclas de dirección solo orientan las ruedas y solo `W` y `S` mueven los motores.
+
+> [!IMPORTANT]
+> El firmware reduce los picos de corriente e informa la causa de cada reinicio. Si el ejecutor vuelve a reiniciarse, la HMI lo avisa y la HMI debug muestra la causa. La alimentación se sigue revisando.
+
+### Qué está listo y qué falta
+
+| Parte | Estado | Detalle |
+|---|---|---|
+| Organización del repositorio | **Listo** | Un solo archivo activo por pieza. Lo anterior está archivado |
+| Lógica de los firmwares | **Probada en PC** | Se ejecutan los `.ino` reales con hardware simulado |
+| HMI normal y HMI debug | **Funcionan** | Usadas con las placas reales |
+| Compilación para ESP32 | **Lista** | Los dos firmwares compilan en el CI con el paquete Arduino ESP32 Boards |
+| Prueba en el rover | **Funciona** | Probado por el equipo con L9110S. El mando de la v3.1 falta probarlo en el rover |
+| Alimentación | **En revisión** | Ver [Alimentación y reinicios](#alimentación-y-reinicios) |
+
+### Próximos pasos
+
+1. Probar en el rover el mando nuevo de la v3.1, sobre todo el pivote (`Q` o `E` más `W`).
+2. Ensayos en rampa a 20 grados (CEPIT) y en terreno natural (Sierra).
+3. Si aparecen reinicios, hacer el [diagnóstico](03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md#diagnostico-de-reinicios-con-la-hmi-debug) con la HMI debug.
+
+---
+
+## Cómo funciona
 
 ```mermaid
-graph TD
-    subgraph ESTACION_PILOTAJE ["1. Estación de Control y Pilotaje"]
-        MANDO["Mando Joystick Físico Autónomo\n(Arduino Nano / Nano ESP32)"]
-        PC_HMI["Software HMI en PC Windows\n(HMI_Rover_V2.py o .EXE)"]
-        ESP32_TX["Módulo Puente USB-RF\n(ESP32-C3 SuperMini)"]
-        
-        PC_HMI -->|"USB Serie 115200 bps\n(Trama Texto / RAW)"| ESP32_TX
-        MANDO -.->|"Telemetría USB Opcional\n(115200 bps CSV)"| PC_HMI
-    end
+flowchart LR
+    PC["HMI en la PC<br/>Python + Tkinter"]
+    TX["Nano ESP32 (1)<br/>TRANSMISOR"]
+    RX["Nano ESP32 (2)<br/>EJECUTOR"]
+    PH["Puente H"]
+    PCA["PCA9685"]
+    MOT["6 motores de CC"]
+    SER["4 servos de dirección"]
 
-    subgraph ENLACE_RF ["2. Enlace Inalámbrico RF (2.4 GHz)"]
-        MANDO -->|"RF NRF24L01+ (Ch 108, 250 kbps)\nTrama Binaria PaqueteControl (8 bytes)"| ROVER
-        ESP32_TX -->|"RF NRF24L01+ (Ch 108, 250 kbps)\nTrama Binaria PaqueteControl (8 bytes)"| ROVER
-    end
-
-    subgraph ROVER ["3. Electrónica de a Bordo del Rover (Receptor)"]
-        MCU_ROVER["Microcontrolador de a Bordo:\nArduino Nano ESP32 (Oficial)\no Arduino MKR 1310"]
-        RF_RX["NRF24L01+ Receptor (3.3V)"]
-        HBRIDGE["Puente H L9110S"]
-        SERVOS["4 Servomotores de Dirección:\nS1 (Del. Izq) - S2 (Del. Der)\nS3 (Tras. Izq) - S4 (Tras. Der)"]
-        MOTORES["6 Ruedas Tracción Rocker-Bogie:\nM1, M2, M3 (Izq) | M4, M5, M6 (Der)"]
-
-        RF_RX -->|"SPI Hardware"| MCU_ROVER
-        MCU_ROVER -->|"PWM Pines D2, D5, D3, D4"| HBRIDGE
-        HBRIDGE --> MOTORES
-        MCU_ROVER -->|"Señales PWM D6, D7, D8, A0"| SERVOS
-    end
+    PC -- "USB: consignas a 20 Hz" --> TX
+    TX -- "USB: estado" --> PC
+    TX -- "WiFi UDP: consignas" --> RX
+    RX -- "WiFi UDP: telemetría a 5 Hz" --> TX
+    RX --> PH --> MOT
+    RX -- "I2C" --> PCA --> SER
 ```
 
+| Etapa | Qué hace | Si algo falla |
+|---|---|---|
+| **HMI** | Convierte teclado o botones en una consigna (potencia por lado y ángulo por servo) y la envía 20 veces por segundo | Si la ventana pierde el foco, suelta las teclas y el rover se detiene |
+| **Transmisor** | Recibe la consigna por USB y la retransmite por WiFi | Si la HMI deja de enviar durante **500 ms**, ordena parada |
+| **Ejecutor** | Aplica la consigna a motores y servos de forma gradual | Si no llegan tramas durante **1 s**, para los motores y centra los servos |
+| **Telemetría** | Informa lo aplicado, la señal WiFi y la causa del último reinicio | Si deja de llegar, la HMI lo marca como falla |
+
 ---
 
-## Catálogo de Firmwares (.ino) y Microcontroladores
+## Cómo se hace la conexión
 
-A continuación se detalla cada código fuente del proyecto, su ubicación exacta, su función y **qué microcontrolador físico está previsto para su funcionamiento**:
+No hace falta router ni internet: el **transmisor crea su propia red** y el **ejecutor se conecta solo** al encenderse.
 
-| Archivo `.ino` | Carpeta en el Repositorio | Microcontrolador Previsto (Última Versión) | Rol en el Sistema |
+| Dato | Transmisor | Ejecutor |
+|---|---|---|
+| Rol WiFi | Access Point | Estación |
+| Red / clave | `ROVER_NET` / `rover1234` | La misma |
+| Canal | 6 | 6 |
+| IP | `192.168.4.1` | `192.168.4.2` (fija) |
+| Alimentación | USB de la PC | Batería del rover |
+
+La red la crea el transmisor porque se alimenta del USB: así el ejecutor no carga con esa emisión permanente sobre la batería que comparte con los motores.
+
+| Tramo | Medio | Formato |
+|---|---|---|
+| HMI a transmisor | USB serie, 115200 bps | Texto: `CMD,izq,der,s1,s2,s3,s4` |
+| Transmisor a ejecutor | WiFi UDP, puerto 4210 | Binario de 13 bytes, con secuencia y CRC-8 |
+| Ejecutor a transmisor | WiFi UDP, puerto 4210 | Binario de 34 bytes, con CRC-8 |
+
+<details>
+<summary><strong>Ver los mensajes que las placas envían a la PC</strong></summary>
+
+| Mensaje | Origen | Contenido |
+|---|---|---|
+| `ID:NANO_ESP32:TX:v3.0` | Ambas (`TX` o `RX`) | Respuesta al pedido `IDENT` |
+| `TX,seq,izq,der,s1,s2,s3,s4,ok` | Transmisor | Cada trama emitida |
+| `LINK,clientes,hmi,edad_tlm_ms` | Transmisor | Estado del enlace, 1 vez por segundo |
+| `RX,seq,izq,der,s1,s2,s3,s4,dt_ms,aIzq,aDer,a1,a2,a3,a4` | Ejecutor | Cada trama recibida y lo aplicado |
+| `TLM,seq,aIzq,aDer,a1,a2,a3,a4,rssi,causa,reinicios,uptime,rxOk,perdidos,crc,failsafes,estado,diag` | Ambas | Telemetría del ejecutor |
+| `BOOT,causa,reinicios` | Ejecutor | Causa del arranque |
+
+</details>
+
+---
+
+## Interfaz gráfica
+
+Las HMI están hechas en **Python** y usan solo dos bibliotecas:
+
+| Biblioteca | Para qué se usa | Instalación |
+|---|---|---|
+| **Tkinter** (con `ttk`) | Ventanas, controles y gráficas dibujadas sobre `Canvas` | Incluida en Python |
+| **pyserial** | Comunicación USB con las placas | `pip install pyserial` (los lanzadores la instalan solos) |
+
+La lectura y el envío por USB corren en hilos propios: mover la ventana no interrumpe el flujo de consignas.
+
+### HMI normal
+
+Para manejar el rover. Se abre con `Lanzar_HMI_Rover.bat` y solo necesita el transmisor conectado.
+
+![HMI normal con datos simulados](03_Documentacion_y_Guias/Imagenes/hmi_normal.png)
+
+<sub>Captura con datos simulados.</sub>
+
+Muestra lo transmitido, lo aplicado en el ejecutor y estas señales de conexión:
+
+| Señal | En OK significa |
+|---|---|
+| **USB** | El puerto está abierto |
+| **Transmisor** | La placa respondió, es el transmisor y tiene la versión correcta |
+| **WiFi** | El ejecutor está asociado a la red |
+| **Telemetría** | Llegaron datos del ejecutor hace menos de 1 s |
+| **Ejecutor** | Está operando y el PCA9685 responde |
+
+**Controles**
+
+Dirección y tracción están separadas. Las teclas de dirección **solo orientan las ruedas**: el rover no se mueve hasta apretar `W` o `S`. Para andar se combinan.
+
+| Tecla | Qué hace sola | Con `W` | Con `S` |
 |---|---|---|---|
-| **`Ejecutor_ArduinoNano_ESP32.ino`** | [`01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32/`](01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32) | **Arduino Nano ESP32** (ESP32-S3 a 3.3V) [Oficial] | **Receptor Oficial del Rover:** 6 motores + 4 servos independientes. |
-| **`Transmisor_ArduinoNano_ESP32.ino`** | [`02_Debug_y_Pruebas/Firmware_Debug/Transmisor_ArduinoNano_ESP32/`](02_Debug_y_Pruebas/Firmware_Debug/Transmisor_ArduinoNano_ESP32) | **Arduino Nano ESP32** (ESP32-S3 a 3.3V) [Oficial] | **Transmisor PC Oficial:** Puente USB-RF con handshake y LED RGB. |
-| **`Joystick_Arduino_Nano.ino`** | [`01_Oficial/Mando_Joystick_Fisico/Joystick_Arduino_Nano/`](01_Oficial/Mando_Joystick_Fisico/Joystick_Arduino_Nano) | **Arduino Nano Clásico (ATmega328P)** o **Arduino Nano ESP32** | **Mando Joystick Físico Autónomo:** Control inalámbrico sin PC. |
-| **`Control_ESP32_C3_Optimizado.ino`** | [`01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado/`](01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado) | **ESP32-C3 SuperMini** / **LOLIN C3 Mini** (RISC-V a 3.3V) | **Transmisor PC Alternativo:** Puente USB Serial a Radiofrecuencia RF24. |
-| **`Control_ESP32_C3_Debug.ino`** | [`02_Debug_y_Pruebas/Firmware_Debug/Control_ESP32_C3_Debug/`](02_Debug_y_Pruebas/Firmware_Debug/Control_ESP32_C3_Debug) | **ESP32-C3 SuperMini** / **LOLIN C3 Mini** | **Transmisor Modo Debug:** Reporte de volcado HEX y métricas de tasa. |
-| **`Ejecutor_ArduinoMKR_Optimizado.ino`** | [`01_Oficial/Receptor_Rover_MKR1310/Ejecutor_ArduinoMKR_Optimizado/`](01_Oficial/Receptor_Rover_MKR1310/Ejecutor_ArduinoMKR_Optimizado) | **Arduino MKR 1310** (SAMD21 ARM Cortex-M0+ a 3.3V) | **Receptor Alternativo:** Versión previa con drenaje rápido y failsafe. |
-| **`Ejecutor_ArduinoMKR_Debug.ino`** | [`02_Debug_y_Pruebas/Firmware_Debug/Ejecutor_ArduinoMKR_Debug/`](02_Debug_y_Pruebas/Firmware_Debug/Ejecutor_ArduinoMKR_Debug) | **Arduino MKR 1310** (SAMD21 ARM Cortex-M0+ a 3.3V) | **Receptor Modo Debug:** Validación cruzada TX/RX y telemetría de retorno. |
+| `W` / `S` | Avanza / retrocede derecho | | |
+| `A` / `D` | Dobla las ruedas a la izquierda / derecha (en CRAB, todas hacia el costado) | Avanza girando | Retrocede girando |
+| `Q` | Pone las ruedas en posición de pivote | Gira en el lugar a la izquierda | Gira en el lugar a la derecha |
+| `E` | Pone las ruedas en posición de pivote | Gira en el lugar a la derecha | Gira en el lugar a la izquierda |
+| `Espacio` | Parada | | |
 
----
+`W` y `S` juntas se anulan. Si hay varias teclas de dirección apretadas, manda `Q`, después `E`, `A` y `D`. Para combinar hay que usar el teclado: con el mouse se aprieta un solo botón a la vez.
 
-## Guía Paso a Paso para Instalar y Flashear cada .ino
+Modos de conducción: **ACKERMANN**, **CRAB** y **MANUAL** (servos por slider).
 
-### Preparación del Entorno (Arduino IDE 2.x)
-1. Descargá e instalá **[Arduino IDE 2.x](https://www.arduino.cc/en/software)**.
-2. Abrí el gestor de librerías (`Ctrl + Shift + I`) e instalá:
-   * **`RF24`** (por *TMRh20*).
-   * **`ESP32Servo`** (por *Kevin Harrington* - obligatoria si usás ESP32).
-   * **`Servo`** (librería estándar integrada para Arduino clásico y SAMD).
+### HMI debug
 
----
+Para banco de pruebas, con **las dos placas conectadas a la PC**. Se abre con `Lanzar_HMI_Debug.bat`.
 
-### 1. Flashear el Receptor Oficial del Rover: `Ejecutor_ArduinoNano_ESP32.ino`
-* **Ubicación:** `01_Oficial/Receptor_Rover_NanoESP32/Ejecutor_ArduinoNano_ESP32/Ejecutor_ArduinoNano_ESP32.ino`
-* **Microcontrolador:** **Arduino Nano ESP32**
-1. En Arduino IDE, andá a **Boards Manager** (`Ctrl + Shift + B`) e instalá el paquete **`Arduino ESP32 Boards`**.
-2. Seleccioná la placa: **`Arduino Nano ESP32`**.
-3. En *Pin Numbering*, dejá la opción predeterminada: **`By Arduino pin (default)`**.
-4. Conectá el cable USB-C al Arduino Nano ESP32 y seleccioná el puerto COM asignado.
-5. Hacé clic en **Subir (Upload)**.
-> *Esquemático completo de conexiones:* Ver [03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md](03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md).
+![HMI debug con datos simulados](03_Documentacion_y_Guias/Imagenes/hmi_debug.png)
 
----
+<sub>Captura con datos simulados, incluido un reinicio por brownout.</sub>
 
-### 2. Flashear el Mando Joystick Autónomo: `Joystick_Arduino_Nano.ino`
-* **Ubicación:** `01_Oficial/Mando_Joystick_Fisico/Joystick_Arduino_Nano/Joystick_Arduino_Nano.ino`
-* **Microcontrolador:** **Arduino Nano Clásico (ATmega328P)** o **Arduino Nano ESP32**
-1. Si usás el Arduino Nano clásico azul:
-   * Seleccioná la placa: **`Arduino Nano`**.
-   * En *Procesador*, elegí **`ATmega328P`** (si da error de sincronización, cambiá a **`ATmega328P (Old Bootloader)`**).
-2. Si usás el Arduino Nano ESP32 negro:
-   * Seleccioná la placa: **`Arduino Nano ESP32`**.
-3. Verificá que la librería `RF24` esté instalada.
-4. Conectá el cable USB, seleccioná el puerto COM y hacé clic en **Subir**.
-> *Guía de armado de hardware y cableado:* Ver [03_Documentacion_y_Guias/Guias/GUIA_JOYSTICK_HARDWARE.md](03_Documentacion_y_Guias/Guias/GUIA_JOYSTICK_HARDWARE.md).
-
----
-
-### 3. Flashear el Módulo Transmisor PC: `Control_ESP32_C3_Optimizado.ino`
-* **Ubicación:** `01_Oficial/Transmisor_PC_ESP32C3/Control_ESP32_C3_Optimizado/Control_ESP32_C3_Optimizado.ino`
-* **Microcontrolador:** **ESP32-C3 SuperMini** / **LOLIN C3 Mini**
-1. En **Boards Manager**, instalá el paquete **`esp32`** de *Espressif Systems*.
-2. Seleccioná la placa: **`ESP32C3 Dev Module`** o **`LOLIN C3 Mini`**.
-3. Ajustes de compilación recomendados en el menú *Tools*:
-   * *USB CDC On Boot:* **`Enabled`** (fundamental para el puerto serie por USB nativo).
-   * *Flash Frequency:* **`80MHz`**.
-4. Conectá el cable USB-C, seleccioná el COM y subí el código.
-
----
-
-### 4. Flashear el Receptor Previo en Arduino MKR: `Ejecutor_ArduinoMKR_Optimizado.ino`
-* **Ubicación:** `01_Oficial/Receptor_Rover_MKR1310/Ejecutor_ArduinoMKR_Optimizado/Ejecutor_ArduinoMKR_Optimizado.ino`
-* **Microcontrolador:** **Arduino MKR 1310** (o MKR WiFi 1010)
-1. En **Boards Manager**, instalá el paquete **`Arduino SAMD Boards (32-bits ARM Cortex-M0+)`**.
-2. Seleccioná la placa: **`Arduino MKR WAN 1310`**.
-3. Conectá el cable micro-USB, seleccioná el COM y subí el código.
-> *Esquemático completo de conexiones:* Ver [03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_MKR1310.md](03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_MKR1310.md).
-
----
-
-## Software HMI de Estacion Terrena (Windows)
-
-Para operar el Rover desde la computadora, el repositorio incluye interfaces graficas especializadas tanto en Python (Tkinter) como en Rust nativo (egui), libres de dependencias complejas y con deteccion inteligente de puertos COM:
-
-* **[`HMI_Rover_V2.py`](01_Oficial/HMI/HMI_Rover_V2.py):** Interfaz principal de pilotaje en produccion con telemetria en tiempo real, digital twin 2D, sliders de calibracion independiente de potencia (trims 0% a 150%) y selector de modos (Ackermann, Cangrejo y Giro 360°).
-* **[`HMI_Rover_Debug.py`](02_Debug_y_Pruebas/HMI_Debug/HMI_Rover_Debug.py):** Suite de depuracion avanzada y banco de pruebas con:
-  - **Matriz de Perfiles de Hardware (`hardware_profiles.py`):** Autodeteccion pasiva por USB VID:PID y confirmacion activa por handshake (`IDENT` -> `ID:<PLACA>:<ROL>:<VERSION>`). Arduino Nano ESP32 como perfil oficial predeterminado.
-  - **Motor de Flasheo en 1 Clic (`flasher_engine.py`):** Compilacion y subida asincrona de firmware para TX y RX directamente desde la GUI mediante `arduino-cli` o fallback a `esptool`.
-  - **Flujo de Calibracion Pre-Despliegue:** Sincronizacion de trims y centros de servos con persistencia en memoria no volatil (`PERSIST_NVS`) y boton de liberacion segura de puerto para operacion en campo por bateria.
-* **Stack Paralelo Nativo en Rust (`HMI-Lunar-Rover-Rust`):**
-  - Aplicacion de escritorio nativa `hmi-gui` renderizada por GPU con `eframe` (egui).
-  - Crate `protocol-rover` compatible con `#![no_std]` y paquetes binarios empaquetados de 6 bytes.
-  - Firmwares embebidos en Rust para el transmisor y receptor (`firmware-tx-esp32` y `firmware-rx-esp32`).
-
-### ¿Como correr la HMI en Windows sin complicaciones?
-Elegi el metodo que prefieras:
-1. **Ejecutable Directo (Sin instalar Python ni nada):**  
-   Hace doble clic en [`Compilar_HMI_a_EXE.bat`](Compilar_HMI_a_EXE.bat) para generar tu archivo **`HMI_Rover_Lunar_V2.exe`**. Luego, cualquier companero solo tiene que hacer doble clic en el `.exe`.
-2. **Lanzador Automatico de Produccion:**  
-   Hace doble clic en [`Lanzar_HMI_Rover.bat`](Lanzar_HMI_Rover.bat). Si no tenes la libreria `pyserial`, el script la detecta y la instala automaticamente en 2 segundos.
-3. **Lanzador de Modo Diagnostico y Flasheo:**  
-   Hace doble clic en [`02_Debug_y_Pruebas/Lanzar_HMI_Debug.bat`](02_Debug_y_Pruebas/Lanzar_HMI_Debug.bat).
-4. **Lanzador del Stack en Rust:**  
-   Abrir terminal en `C:\Users\joaqu\Desktop\HMI-Lunar-Rover-Rust` y ejecutar `cargo run -p hmi-gui`.
-
-> *Manual de usuario en 1 minuto:* Consulta [`03_Documentacion_y_Guias/Guias/GUIA_RAPIDA_EQUIPO.md`](03_Documentacion_y_Guias/Guias/GUIA_RAPIDA_EQUIPO.md).
-
----
-
-## Reglas Criticas de Seguridad y Lecciones de Hardware
-
-> [!CAUTION]
-> **1. ALIMENTACIÓN DEL NRF24L01: NUNCA CONECTAR A 5V**  
-> El módulo de radio tolera 5V en sus líneas lógicas SPI, pero su pin **VCC debe recibir estrictamente 3.3V**. Conectarlo a 5V destruye la radio de inmediato.
-
-> [!IMPORTANT]
-> **2. CAPACITOR ELECTROLÍTICO OBLIGATORIO (10 µF a 100 µF)**  
-> Es mandatorio soldar un capacitor electrolítico directamente entre los pines **VCC y GND del NRF24L01+**. Previene caídas bruscas de tensión durante picos de transmisión y elimina la pérdida aleatoria de paquetes.
-
-> [!WARNING]
-> **3. REGULACIÓN PARA SERVOMOTORES (PROHIBIDO LM7805)**  
-> Los 4 servomotores deben ser alimentados **únicamente mediante un regulador Step-Down conmutado (Buck) ajustado a 5V - 6V** (con masa común unida al microcontrolador). Nunca alimentar servos desde el pin 3.3V ni 5V del microcontrolador.
-
-> [!IMPORTANT]
-> **4. LÍMITES ANGULARES POR SOFTWARE ([10°, 170°])**  
-> Para evitar trabas mecánicas y rotura de la piñonería de los servomotores, ningún comando de software solicita valores por fuera del rango seguro [10°, 170°].
+- **Detecta las placas:** identifica cuál es el transmisor y cuál el ejecutor.
+- **Compara trama por trama:** muestra enviadas, recibidas, perdidas, diferentes y latencia.
+- **Grafica:** enviado, recibido y aplicado de cada motor y servo, más latencia y señal WiFi.
+- **Marca los reinicios:** cada uno queda en las gráficas con su causa, y la línea se corta mientras no hay datos.
+- **Reproduce picos:** trae perfiles de escalón, inversión, seno, barrido de servos y esfuerzo total. Solo emite al activar **Emitir consignas**.
+- **Exporta:** guarda la sesión en CSV.
 
 > [!NOTE]
-> **5. WATCHDOG FAILSAFE DE EMERGENCIA (1000 ms)**  
-> Si el receptor de a bordo deja de recibir tramas de radio por más de 1 segundo, la rutina de seguridad interrumpe automáticamente la señal PWM y detiene los 6 motores a 0 de forma preventiva.
+> Cuando el ejecutor se reinicia, su puerto USB desaparece unos segundos. La HMI se reconecta sola.
 
 ---
 
-## Estructura del Repositorio
+## Puesta en marcha
 
-El repositorio se encuentra estrictamente organizado por módulos funcionales:
+### 1. Cargar los firmwares
+
+Con Arduino IDE o `arduino-cli`. Hace falta el paquete **Arduino ESP32 Boards** (placa *Arduino Nano ESP32*) y la biblioteca **Adafruit PWM Servo Driver Library**.
+
+```bash
+arduino-cli core install arduino:esp32
+arduino-cli lib install "Adafruit PWM Servo Driver Library"
+arduino-cli compile --fqbn arduino:esp32:nano_nora --upload -p COMx 01_Oficial/Transmisor_NanoESP32
+arduino-cli compile --fqbn arduino:esp32:nano_nora --upload -p COMy 01_Oficial/Ejecutor_NanoESP32
+```
+
+El firmware viene para el rover tal como está: **3 módulos L9110S dobles en paralelo** y sentido de giro invertido en los dos lados (`INVERTIR_IZQ` e `INVERTIR_DER` en `true`). Para **L298N**, poner `#define PUENTE_H_L298N 1` en `Ejecutor_NanoESP32.ino`. En esta PCB eso deja la mitad de los canales sin señal.
+
+### 2. Cablear el ejecutor
+
+El transmisor no lleva módulos externos, solo el cable USB.
+
+| Componente | Señal | Pin del Nano ESP32 |
+|---|---|---|
+| L9110S, lado izquierdo (a los 3 módulos) | A1A / A1B | D2 / D5 |
+| L9110S, lado derecho (a los 3 módulos) | B1A / B1B | D3 / D4 |
+| L298N (alternativa), lado izquierdo | ENA / IN1 / IN2 | D2 / D3 / D4 |
+| L298N (alternativa), lado derecho | ENB / IN3 / IN4 | D5 / D6 / D7 |
+| PCA9685 | SDA / SCL | A4 / A5 |
+| Servos S1 / S2 / S3 / S4 | Señal | Canales 0 / 1 / 2 / 3 del PCA9685 |
+
+El detalle completo está en el [esquemático](03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md).
+
+### 3. Conectar y manejar
+
+1. Encender el rover.
+2. Conectar el transmisor a la PC por USB.
+3. Abrir `Lanzar_HMI_Rover.bat`, elegir el puerto y tocar **CONECTAR**.
+4. Con todas las señales en **OK**, ya se puede manejar.
+
+---
+
+## Alimentación y reinicios
+
+Cuando motores y servos arrancan a la vez, la tensión cae y el ESP32 se reinicia. Eso es un **brownout**, y la HMI lo avisa en pantalla.
+
+### Lo que hace el firmware
+
+| Medida | Efecto |
+|---|---|
+| Rampa de PWM (0 a 255 en unos 640 ms) | Los motores no arrancan de golpe |
+| Inversión de giro pasando por cero, con pausa | Evita frenar a contramarcha |
+| Arranque desfasado de cada lado | Los dos lados no salen de cero a la vez |
+| Servos escalonados (hasta 75 grados/s) | Se escribe un solo servo por vez |
+| Fases distintas por canal en el PCA9685 | Los pulsos de los servos no coinciden |
+| Arranque por etapas | Primero los servos, de a uno, y después el WiFi |
+| Límite de ángulo de 10 a 170 grados | El servo no fuerza contra su tope |
+| Potencia WiFi reducida en el ejecutor | Menos picos de radio sobre la batería |
+
+### Lo que tiene que hacer el hardware
+
+> [!WARNING]
+> El firmware reduce los picos, pero **no reemplaza una buena alimentación**. Cada carga necesita su riel, con todos los negativos unidos en un solo punto.
+
+```mermaid
+flowchart LR
+    BAT["Batería"]
+    BAT --> C1["1000 uF"] --> M["Puente H y motores"]
+    BAT --> BUCK["Buck o UBEC 5-6 V"] --> C2["1000 uF"] --> S["V+ del PCA9685 y servos"]
+    BAT --> D["Diodo Schottky"] --> C3["470 uF"] --> A["VIN del Nano ESP32"]
+```
+
+El [esquemático](03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md) explica cómo dimensionar los reguladores y cómo aislar la causa paso a paso.
+
+---
+
+## Estructura del repositorio
 
 ```text
 HMI-Lunar-Rover/
-│
-├── 01_Oficial/                                # Firmwares e interfaz en produccion
-│   ├── HMI/                                   # HMI_Rover_V2.py (GUI principal de pilotaje)
-│   ├── Receptor_Rover_NanoESP32/              # Ejecutor_ArduinoNano_ESP32.ino (Receptor Oficial)
-│   ├── Receptor_Rover_MKR1310/                # Ejecutor_ArduinoMKR_Optimizado.ino (Receptor previo)
-│   ├── Transmisor_PC_ESP32C3/                 # Control_ESP32_C3_Optimizado.ino (Puente USB-RF)
-│   └── Mando_Joystick_Fisico/                 # Joystick_Arduino_Nano.ino (Mando RC autonomo)
-│
-├── 02_Debug_y_Pruebas/                        # Herramientas de depuracion y laboratorio
-│   ├── HMI_Debug/                             # HMI_Rover_Debug.py (Telemetria y validacion)
-│   ├── Firmware_Debug/                        # Firmwares con volcado HEX y logs FIFO
-│   ├── Test_RF_Unitarios/                     # Sketches de prueba de radiofrecuencia NRF24L01
-│   └── Lanzar_HMI_Debug.bat                   # Acceso directo al modo diagnostico
-│
-├── 03_Documentacion_y_Guias/                  # Manuales y planos de conexionado
-│   ├── Guias/                                 # GUIA_RAPIDA_EQUIPO, GUIA_JOYSTICK_HARDWARE, etc.
-│   └── Esquematicos/                          # ESQUEMATICO_NANO_ESP32 y ESQUEMATICO_MKR1310
-│
-├── 04_Legacy_y_Versiones_Previas/             # Archivos historicos o de grupos anteriores
-│   ├── WindowsFormsApp4/                      # Interfaz en C# / .NET del grupo anterior
-│   ├── WindowsFormsApp4.slnx
-│   ├── Firmwares_Historicos/                  # Codigos de referencia v0.1, v0.2, LOLIN, etc.
-│   ├── Interfaces_Historicas/                 # Scripts Python preliminares
-│   └── Documentos_Originales/                 # Contexto actual.docx original
-│
-├── Herramientas_Docker_Wine/                  # Simulacion de Windows limpio en contenedor
-│   ├── Dockerfile.wine-test                   # Definicion del entorno reproducible
-│   ├── run_simulation.sh                     # Runner de pruebas automatizadas
-│   ├── Simular_en_Docker.bat                  # Lanzador Windows (1 clic)
-│   └── Simular_en_Docker.sh                   # Lanzador Linux / WSL
-│
-│   ─── SOLO ARCHIVOS ESENCIALES EN LA RAIZ ───
-├── README.md                                  # Guia principal del proyecto y catalogo
-├── AGENTS.md                                  # Contexto tecnico para desarrolladores e IA
-├── Lanzar_HMI_Rover.bat                       # Lanzador inteligente en Windows (1 clic)
-├── Compilar_HMI_a_EXE.bat                     # Compilador de 1 clic a HMI_Rover_Lunar_V2.exe
-├── Subir_Cambios.bat                          # Sincronizador rapido con GitHub
-└── .gitignore                                 # Exclusiones de Git
+├── 01_Oficial/                     El sistema activo: solo estos cuatro archivos
+│   ├── Transmisor_NanoESP32/       Firmware del transmisor
+│   ├── Ejecutor_NanoESP32/         Firmware del ejecutor
+│   └── HMI/                        HMI_Rover.py y HMI_Rover_Debug.py
+├── 03_Documentacion_y_Guias/       Esquemático vigente, imágenes y material de estudio
+├── 04_Deprecado/                   Versiones anteriores, solo como referencia
+├── 05_Futuro/                      Rust + LiDAR y joystick, todavía sin uso
+├── tests/                          Pruebas de estructura, firmware y HMI
+├── AGENTS.md                       Reglas para trabajar en el repositorio
+├── CHANGELOG.md                    Historial de versiones
+└── HANDOVER_SESION.md              Estado detallado del proyecto
 ```
+
+> [!NOTE]
+> Las guías de estudio de `03_Documentacion_y_Guias/Guias/` todavía describen la arquitectura anterior con nRF24.
+
+**Regla del repositorio:** un solo archivo activo por pieza, sin copias `_v2` ni `_pre`. Una prueba falla si se rompe. Ver [AGENTS.md](AGENTS.md).
 
 ---
 
-## Documentacion Tecnica Detallada
+## Python y Rust
 
-* Para profundizar en los detalles de conexionado pin a pin y pines libres del receptor: [`03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md`](03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md).
-* Para consultar el estudio de viabilidad y costos de LiDAR, camaras y mapeo 3D en Rust para cuevas: [`03_Documentacion_y_Guias/Guias/ESTUDIO_VIABILIDAD_MAPEO_LIDAR_CAMARA_RUST.md`](03_Documentacion_y_Guias/Guias/ESTUDIO_VIABILIDAD_MAPEO_LIDAR_CAMARA_RUST.md).
-* Para armar el mando físico con joysticks y potenciómetro: [`03_Documentacion_y_Guias/Guias/GUIA_JOYSTICK_HARDWARE.md`](03_Documentacion_y_Guias/Guias/GUIA_JOYSTICK_HARDWARE.md).
-* Para conocer las directrices completas de desarrollo y arquitectura de software: [`AGENTS.md`](AGENTS.md).
-* Para evaluar el análisis de MicroPython y la futura plataforma Arduino UNO Q: [`03_Documentacion_y_Guias/Guias/EVALUACION_TECNICA_MICROPYTHON_ARDUINO_Q.md`](03_Documentacion_y_Guias/Guias/EVALUACION_TECNICA_MICROPYTHON_ARDUINO_Q.md).
-* Para explorar el codigo y documentacion del stack paralelo nativo en Rust: [`C:\Users\joaqu\Desktop\HMI-Lunar-Rover-Rust`](../HMI-Lunar-Rover-Rust).
+Son dos líneas separadas, y hoy solo se usa Python.
 
+| | HMI en Python | HMI en Rust |
+|---|---|---|
+| **Estado** | En uso: es la HMI oficial | Sin usar por ahora |
+| **Ubicación** | [`01_Oficial/HMI/`](01_Oficial/HMI/) | Repositorio aparte `HMI-Lunar-Rover-Rust`, con su lanzador en [`05_Futuro/Rust_LiDAR/`](05_Futuro/Rust_LiDAR/) |
+| **Se usa para** | Pilotaje y diagnóstico | Visualizar nubes de puntos del LiDAR, cuando se haga |
+
+Para usar Rust con la v3.0 primero hay que adaptarlo al protocolo nuevo. Ver [`05_Futuro/README.md`](05_Futuro/README.md).
+
+---
+
+## Pruebas
+
+```bash
+python -m unittest discover -s tests
+```
+
+Las pruebas de firmware requieren `g++` y las de interfaz requieren Tkinter. Se omiten si no están disponibles. Validan la lógica en la PC, **no reemplazan la prueba en el rover**.

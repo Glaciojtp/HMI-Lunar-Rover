@@ -110,10 +110,15 @@ class HMIRoverRockerBogieV21Pre:
         self._log_buffer = []
         self._actualizando_desde_teclas = False
 
-        # Control de concurrencia y rate-limiting serial
-        self.lock_serial = threading.Lock()
-        self._ultimo_envio_slider = 0.0
-        self._timer_slider_id = None
+        # Reconexion automatica y control de flujo TX
+        self.auto_reconectar = tk.BooleanVar(value=True) if tk else None
+        self.ultimo_puerto_desconectado = None
+        self._ultimo_tiempo_tx = 0.0
+        self._tx_pendiente = False
+        self._ultimo_raw_enviado = b""
+        self._bloqueo_tx = threading.Lock()
+        self.hilo_reconexion = None
+        self.hilo_tx_stream = None
 
         # Estado dinamico de control
         self.comando_actual = " "
@@ -146,10 +151,6 @@ class HMIRoverRockerBogieV21Pre:
         self.invertir_servos = tk.BooleanVar(value=False)
         self.servos_360 = tk.BooleanVar(value=False)
         self.sliders_servos = {}
-
-        # Inversion de polaridad PWM para traccion (por defecto Izquierda invertida para compensar orientacion del chasis)
-        self.invertir_pwm_izq = tk.BooleanVar(value=True)
-        self.invertir_pwm_der = tk.BooleanVar(value=False)
 
         # Conexion Serial Joystick Fisico (Arduino Nano)
         self.serial_joy = None
@@ -272,9 +273,16 @@ class HMIRoverRockerBogieV21Pre:
         self.cb_modo.pack(side="left", padx=2)
         self.cb_modo.bind("<<ComboboxSelected>>", self.cambiar_modo_conduccion)
 
+        # Checkbox Auto-reconexion
+        self.chk_auto = tk.Checkbutton(top_frame, text="Auto-reconnect", variable=self.auto_reconectar,
+                                       bg="#212433", fg="#94a3b8", selectcolor="#0c0e17",
+                                       activebackground="#212433", activeforeground="#00f5d4",
+                                       font=("Segoe UI", 8), takefocus=0)
+        self.chk_auto.pack(side="left", padx=4)
+
         # Indicador de Estado
         self.lbl_estado_badge = tk.Label(top_frame, text="[DESCONECTADO]", bg="#374151", fg="#f87171",
-                                         font=("Segoe UI", 9, "bold"), padx=6, pady=2, width=14)
+                                         font=("Segoe UI", 9, "bold"), padx=6, pady=2, width=16)
         self.lbl_estado_badge.pack(side="right", padx=2)
 
         # =========================================================================
@@ -366,10 +374,6 @@ class HMIRoverRockerBogieV21Pre:
         tk.Scale(frm_mi, from_=0, to=255, orient="horizontal", variable=self.master_izq,
                  bg="#212433", fg="#00f5d4", highlightthickness=0, command=self.sync_master_izq, takefocus=0).pack(side="right", fill="x", expand=True)
 
-        tk.Checkbutton(col_m_izq, text="Invertir PWM Izq", variable=self.invertir_pwm_izq,
-                       bg="#212433", fg="#00f5d4", selectcolor="#161822", activebackground="#212433",
-                       font=("Segoe UI", 8, "bold"), command=self.al_cambiar_inversion_pwm, takefocus=0).pack(anchor="w", pady=(2, 0))
-
         # Columna Derecha Motores
         col_m_der = ttk.Frame(grid_motores, style="Card.TFrame")
         col_m_der.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
@@ -383,10 +387,6 @@ class HMIRoverRockerBogieV21Pre:
         ttk.Label(frm_md, text="Master Der:", style="SubHeader.TLabel").pack(side="left")
         tk.Scale(frm_md, from_=0, to=255, orient="horizontal", variable=self.master_der,
                  bg="#212433", fg="#00f5d4", highlightthickness=0, command=self.sync_master_der, takefocus=0).pack(side="right", fill="x", expand=True)
-
-        tk.Checkbutton(col_m_der, text="Invertir PWM Der", variable=self.invertir_pwm_der,
-                       bg="#212433", fg="#e2e8f0", selectcolor="#161822", activebackground="#212433",
-                       font=("Segoe UI", 8), command=self.al_cambiar_inversion_pwm, takefocus=0).pack(anchor="w", pady=(2, 0))
 
         # -------------------------------------------------------------------------
         # TARJETA 2 (IZQ): 4 SERVOS DE DIRECCION INDEPENDIENTES (S1, S2, S3, S4)
@@ -468,8 +468,6 @@ class HMIRoverRockerBogieV21Pre:
         self.btn_w = tk.Button(grid_botones, text="W\n(Adelante)", width=9, height=2, bg="#334155", fg="#ffffff",
                                font=("Segoe UI", 8, "bold"), relief="flat", takefocus=0)
         self.btn_w.grid(row=0, column=1, padx=2, pady=2)
-        self.btn_w.bind("<ButtonPress-1>", lambda e: self.evento_mouse_boton("w", True))
-        self.btn_w.bind("<ButtonRelease-1>", lambda e: self.evento_mouse_boton("w", False))
 
         self.btn_e = tk.Button(grid_botones, text="E\n(Eje Der)", width=7, height=2, bg="#334155", fg="#00f5d4",
                                font=("Segoe UI", 7, "bold"), relief="flat", command=lambda: self.activar_macro("PIVOT_DER"), takefocus=0)
@@ -478,8 +476,6 @@ class HMIRoverRockerBogieV21Pre:
         self.btn_a = tk.Button(grid_botones, text="A\n(Giro Izq)", width=7, height=2, bg="#334155", fg="#ffffff",
                                font=("Segoe UI", 7, "bold"), relief="flat", takefocus=0)
         self.btn_a.grid(row=1, column=0, padx=2, pady=2)
-        self.btn_a.bind("<ButtonPress-1>", lambda e: self.evento_mouse_boton("a", True))
-        self.btn_a.bind("<ButtonRelease-1>", lambda e: self.evento_mouse_boton("a", False))
 
         self.btn_stop = tk.Button(grid_botones, text="STOP\n(Espacio)", width=9, height=2, bg="#e63946", fg="#ffffff",
                                   font=("Segoe UI", 8, "bold"), relief="flat", command=self.parar_emergencia, takefocus=0)
@@ -488,14 +484,10 @@ class HMIRoverRockerBogieV21Pre:
         self.btn_d = tk.Button(grid_botones, text="D\n(Giro Der)", width=7, height=2, bg="#334155", fg="#ffffff",
                                font=("Segoe UI", 7, "bold"), relief="flat", takefocus=0)
         self.btn_d.grid(row=1, column=2, padx=2, pady=2)
-        self.btn_d.bind("<ButtonPress-1>", lambda e: self.evento_mouse_boton("d", True))
-        self.btn_d.bind("<ButtonRelease-1>", lambda e: self.evento_mouse_boton("d", False))
 
         self.btn_s = tk.Button(grid_botones, text="S\n(Atras)", width=9, height=2, bg="#334155", fg="#ffffff",
                                font=("Segoe UI", 8, "bold"), relief="flat", takefocus=0)
         self.btn_s.grid(row=2, column=1, padx=2, pady=2)
-        self.btn_s.bind("<ButtonPress-1>", lambda e: self.evento_mouse_boton("s", True))
-        self.btn_s.bind("<ButtonRelease-1>", lambda e: self.evento_mouse_boton("s", False))
 
         # -------------------------------------------------------------------------
         # TARJETA 4 (DER): MONITOR DE TELEMETRIA EN VIVO (SERVOS Y PWM)
@@ -640,8 +632,8 @@ class HMIRoverRockerBogieV21Pre:
 
         def al_mover(val):
             self.actualizar_labels_trim()
-            if self.conectado and self.rover_en_movimiento():
-                self._solicitar_envio_throttled()
+            if self.conectado and self.comando_actual != "STOP":
+                self.enviar_trama_actual()
             self.redibujar_rover_actual()
 
         s = tk.Scale(frm, from_=0, to=150, orient="horizontal", variable=variable,
@@ -708,7 +700,7 @@ class HMIRoverRockerBogieV21Pre:
         for i in range(1, 7):
             getattr(self, f"trim_m{i}").set(100)
         self.actualizar_labels_trim()
-        if self.conectado and self.rover_en_movimiento():
+        if self.conectado and self.comando_actual != "STOP":
             self.enviar_trama_actual()
         self.redibujar_rover_actual()
         self.log_consola("SYS", "Trims de los 6 motores restablecidos al 100% (Ratio 1.0x).")
@@ -779,37 +771,6 @@ class HMIRoverRockerBogieV21Pre:
         else:
             self.redibujar_rover_actual()
 
-    def rover_en_movimiento(self) -> bool:
-        cmd = self.comando_actual.strip().upper()
-        return bool(cmd and cmd != "STOP")
-
-    def _solicitar_envio_throttled(self):
-        ahora = time.time()
-        if ahora - self._ultimo_envio_slider >= 0.05:
-            self._ultimo_envio_slider = ahora
-            if self._timer_slider_id is not None:
-                try:
-                    self.root.after_cancel(self._timer_slider_id)
-                except Exception:
-                    pass
-                self._timer_slider_id = None
-            self.enviar_trama_actual()
-        elif self._timer_slider_id is None:
-            delay_ms = max(10, int((0.05 - (ahora - self._ultimo_envio_slider)) * 1000))
-            self._timer_slider_id = self.root.after(delay_ms, self._ejecutar_envio_slider_final)
-
-    def _ejecutar_envio_slider_final(self):
-        self._timer_slider_id = None
-        self._ultimo_envio_slider = time.time()
-        self.enviar_trama_actual()
-
-    def al_cambiar_inversion_pwm(self):
-        izq_txt = "INVERTIDO" if self.invertir_pwm_izq.get() else "DIRECTO"
-        der_txt = "INVERTIDO" if self.invertir_pwm_der.get() else "DIRECTO"
-        self.log_consola("SYS", f"Inversion polaridad PWM de traccion: Izq={izq_txt}, Der={der_txt}")
-        if self.conectado and self.rover_en_movimiento():
-            self.enviar_trama_actual()
-
     def preset_point_turn(self):
         s1, s2, s3, s4 = self.calcular_cinematica_inversa(0.0, 0.0, -1.0)
         self.ang_s1.set(s1); self.ang_s2.set(s2); self.ang_s3.set(s3); self.ang_s4.set(s4)
@@ -831,27 +792,27 @@ class HMIRoverRockerBogieV21Pre:
 
     def sync_master_izq(self, val):
         self.actualizar_labels_trim()
-        if self.conectado and self.rover_en_movimiento():
-            self._solicitar_envio_throttled()
+        if self.conectado and self.comando_actual != "STOP":
+            self.enviar_trama_actual()
         self.redibujar_rover_actual()
 
     def sync_master_der(self, val):
         self.actualizar_labels_trim()
-        if self.conectado and self.rover_en_movimiento():
-            self._solicitar_envio_throttled()
+        if self.conectado and self.comando_actual != "STOP":
+            self.enviar_trama_actual()
         self.redibujar_rover_actual()
 
     def al_mover_slider_motor(self, val):
-        if self.conectado and self.rover_en_movimiento():
-            self._solicitar_envio_throttled()
+        if self.conectado and self.comando_actual != "STOP":
+            self.enviar_trama_actual()
         self.redibujar_rover_actual()
 
     def al_mover_servo(self, val):
         if getattr(self, '_actualizando_desde_teclas', False):
             return
         self.redibujar_rover_actual()
-        if self.conectado:
-            self._solicitar_envio_throttled()
+        if self.conectado and self.comando_actual != "STOP":
+            self.enviar_trama_actual()
 
     def calcular_pwms_actuales(self):
         cmd = self.comando_actual.strip().upper()
@@ -906,19 +867,20 @@ class HMIRoverRockerBogieV21Pre:
         c.create_rectangle(cx - 30, cy - 45, cx + 30, cy + 45, fill="#1e293b", outline="#00f5d4", width=2)
         c.create_text(cx, cy, text="ROCKER\nBOGIE", fill="#00f5d4", font=("Segoe UI", 7, "bold"), justify="center")
 
+        pos_ruedas = [
+            (cx - 48, cy - 42, s1, "M1"),
+            (cx + 48, cy - 42, s2, "M4"),
+            (cx - 48, cy,      90, "M2"),
+            (cx + 48, cy,      90, "M5"),
+            (cx - 48, cy + 42, s3, "M3"),
+            (cx + 48, cy + 42, s4, "M6"),
+        ]
+
         if pwms is None:
             pwms = [0] * 6
 
-        pos_ruedas = [
-            (cx - 48, cy - 42, s1, "M1", pwms[0]),
-            (cx + 48, cy - 42, s2, "M4", pwms[3]),
-            (cx - 48, cy,      90, "M2", pwms[1]),
-            (cx + 48, cy,      90, "M5", pwms[4]),
-            (cx - 48, cy + 42, s3, "M3", pwms[2]),
-            (cx + 48, cy + 42, s4, "M6", pwms[5]),
-        ]
-
-        for rx, ry, ang, label, pwm in pos_ruedas:
+        for i, (rx, ry, ang, label) in enumerate(pos_ruedas):
+            pwm = pwms[i] if i < len(pwms) else 0
             color = "#38b000" if pwm > 0 else ("#ff9f1c" if pwm < 0 else "#64748b")
             self.dibujar_rueda_orientada(c, rx, ry, ang, color, label, pwm)
 
@@ -947,13 +909,18 @@ class HMIRoverRockerBogieV21Pre:
             arrow_color = "#34d399" if pwm > 0 else "#f97316"
             longitud = 8 + int((min(255, abs(pwm)) / 255.0) * 10)
             signo = 1.0 if pwm > 0 else -1.0
-            ux = sin_t
-            uy = -cos_t
+
+            ux = math.sin(theta)
+            uy = -math.cos(theta)
+
             x_ini = x + signo * (hh * 0.4) * ux
             y_ini = y + signo * (hh * 0.4) * uy
             x_fin = x + signo * (hh + longitud) * ux
             y_fin = y + signo * (hh + longitud) * uy
-            c.create_line(x_ini, y_ini, x_fin, y_fin, fill=arrow_color, width=2, arrow=tk.LAST, arrowshape=(6, 8, 3))
+
+            c.create_line(x_ini, y_ini, x_fin, y_fin,
+                          fill=arrow_color, width=2,
+                          arrow=tk.LAST, arrowshape=(6, 8, 3))
 
     def actualizar_lista_puertos(self):
         if not SERIAL_DISPONIBLE:
@@ -1004,7 +971,7 @@ class HMIRoverRockerBogieV21Pre:
             return
 
         if self.conectado:
-            self.desconectar()
+            self.desconectar(manual=True)
         else:
             puerto = self.cb_puertos.get()
             if not puerto or puerto == "Sin puertos":
@@ -1024,6 +991,7 @@ class HMIRoverRockerBogieV21Pre:
                 time.sleep(0.15)
                 self.serial_conn.dtr = True
                 self.conectado = True
+                self.ultimo_puerto_desconectado = None
                 self.btn_conectar.config(text="DESCONECTAR", bg="#e63946", fg="#ffffff")
                 self.lbl_estado_badge.config(text="[CONECTADO]", bg="#064e3b", fg="#34d399")
                 self.log_consola("SYS", f"Conexion exitosa en {puerto} a {baud} baud.")
@@ -1034,31 +1002,105 @@ class HMIRoverRockerBogieV21Pre:
                     messagebox.showerror("Error de Conexion", f"No se pudo abrir {puerto}:\n{e}")
                 self.log_consola("ERR", f"Error al abrir {puerto}: {e}")
 
-    def desconectar(self):
+    def desconectar(self, manual=True):
         self.conectado = False
-        with self.lock_serial:
-            if self.serial_conn and self.serial_conn.is_open:
-                try:
-                    self.serial_conn.close()
-                except Exception:
-                    pass
+        if manual:
+            self.ultimo_puerto_desconectado = None
+        if self.serial_conn and self.serial_conn.is_open:
+            try:
+                self.serial_conn.close()
+            except Exception:
+                pass
+        self.serial_conn = None
         self.btn_conectar.config(text="CONECTAR", bg="#00f5d4", fg="#0f172a")
         self.lbl_estado_badge.config(text="[DESCONECTADO]", bg="#374151", fg="#f87171")
         self.log_consola("SYS", "Puerto serial desconectado.")
 
+    def notificar_desconexion_abrupta(self, motivo=""):
+        if not self.conectado:
+            return
+        self.conectado = False
+        self.ultimo_puerto_desconectado = self.cb_puertos.get()
+        if self.serial_conn:
+            try:
+                self.serial_conn.close()
+            except Exception:
+                pass
+            self.serial_conn = None
+
+        def _actualizar_ui():
+            self.btn_conectar.config(text="CONECTAR", bg="#00f5d4", fg="#0f172a")
+            self.lbl_estado_badge.config(text="[RECONECTANDO...]", bg="#7c2d12", fg="#fb923c")
+            self.log_consola("WARN", f"Perdida de comunicacion serial ({motivo}). Buscando reconexion automatica...")
+
+        if hasattr(self, 'root') and self.root:
+            try:
+                self.root.after(0, _actualizar_ui)
+            except Exception:
+                pass
+
+    def intentar_reconectar_puerto(self, puerto):
+        baud = int(self.cb_baud.get()) if hasattr(self, 'cb_baud') else 115200
+        try:
+            conn = serial.Serial()
+            conn.port = puerto
+            conn.baudrate = baud
+            conn.timeout = 0.1
+            conn.rts = False
+            conn.dtr = False
+            conn.open()
+            time.sleep(0.15)
+            conn.dtr = True
+            self.serial_conn = conn
+            self.conectado = True
+            self.ultimo_puerto_desconectado = None
+
+            def _exito():
+                self.cb_puertos.set(puerto)
+                self.btn_conectar.config(text="DESCONECTAR", bg="#e63946", fg="#ffffff")
+                self.lbl_estado_badge.config(text="[CONECTADO]", bg="#064e3b", fg="#34d399")
+                self.log_consola("SYS", f"Reconexion automatica exitosa en {puerto} a {baud} baud.")
+                self.ident_o_ping()
+
+            if hasattr(self, 'root') and self.root:
+                self.root.after(0, _exito)
+        except Exception:
+            pass
+
+    def bucle_reconexion_automatica(self):
+        while self.ejecutando:
+            if getattr(self, 'auto_reconectar', None) and self.auto_reconectar.get() and not self.conectado and self.ultimo_puerto_desconectado:
+                try:
+                    if SERIAL_DISPONIBLE:
+                        puertos_actuales = [p.device for p in serial.tools.list_ports.comports()]
+                        puerto_a_intentar = None
+                        if self.ultimo_puerto_desconectado in puertos_actuales:
+                            puerto_a_intentar = self.ultimo_puerto_desconectado
+                        elif puertos_actuales:
+                            for p in serial.tools.list_ports.comports():
+                                if p.vid and p.pid:
+                                    perfil = self.registry.buscar_por_vid_pid(p.vid, p.pid)
+                                    if perfil:
+                                        puerto_a_intentar = p.device
+                                        break
+                        if puerto_a_intentar:
+                            self.intentar_reconectar_puerto(puerto_a_intentar)
+                except Exception:
+                    pass
+            time.sleep(1.0)
+
     def ident_o_ping(self):
-        if not self.conectado or not self.serial_conn:
+        if not self.conectado or not self.serial_conn or not self.serial_conn.is_open:
             self.log_consola("WARN", "No conectado para enviar IDENT/PING.")
             return
         try:
-            with self.lock_serial:
-                if self.serial_conn and self.serial_conn.is_open:
-                    self.serial_conn.write(b"IDENT\n")
+            self.serial_conn.write(b"IDENT\n")
             self.log_consola("TX", "[TX IDENT -> MCU]: Solicitando identificacion de firmware...")
         except Exception as e:
             self.log_consola("ERR", f"Error enviando IDENT: {e}")
+            self.notificar_desconexion_abrupta(str(e))
 
-    def generar_trama_control(self):
+    def enviar_trama_actual(self, forzar=False):
         cmd = self.comando_actual.upper()
         if cmd == " ":
             cmd = "STOP"
@@ -1094,34 +1136,31 @@ class HMIRoverRockerBogieV21Pre:
         self.snapshot['s3'] = s3
         self.snapshot['s4'] = s4
 
-        if cmd == "STOP":
-            return f"STOP,0,0,{s1},{s2},{s3},{s4}\n"
-
-        # Aplicar inversion de polaridad si esta configurada
-        signo_izq = -1 if self.invertir_pwm_izq.get() else 1
-        signo_der = -1 if self.invertir_pwm_der.get() else 1
-
-        trama_pot_izq = signo_izq * abs(pot_izq)
-        trama_pot_der = signo_der * abs(pot_der)
-
-        return f"{cmd},{trama_pot_izq},{trama_pot_der},{s1},{s2},{s3},{s4}\n"
-
-    def enviar_trama_actual(self):
-        trama = self.generar_trama_control()
-        if not self.conectado or not self.serial_conn:
+        if not self.conectado or not self.serial_conn or not self.serial_conn.is_open:
             return
 
+        trama = f"{cmd},{abs(pot_izq)},{abs(pot_der)},{s1},{s2},{s3},{s4}\n"
         raw_bytes = trama.encode('ascii')
-        try:
-            with self.lock_serial:
-                if self.serial_conn and self.serial_conn.is_open:
-                    self.serial_conn.write(raw_bytes)
-            self.paquetes_tx_contador += 1
-        except Exception as e:
-            self.log_consola("ERR", f"Error TX: {e}")
+
+        ahora = time.time()
+        with self._bloqueo_tx:
+            # Control de flujo / rate-limiter: max 25 Hz (40 ms) para proteger buffers USB CDC y evitar WDT en MCU
+            if not forzar and (ahora - self._ultimo_tiempo_tx < 0.040):
+                self._tx_pendiente = True
+                return
+
+            try:
+                self.serial_conn.write(raw_bytes)
+                self.paquetes_tx_contador += 1
+                self._ultimo_tiempo_tx = ahora
+                self._ultimo_raw_enviado = raw_bytes
+                self._tx_pendiente = False
+            except Exception as e:
+                self.log_consola("ERR", f"Error TX: {e}")
+                self.notificar_desconexion_abrupta(str(e))
 
     def sincronizar_calibracion(self):
-        if not self.conectado or not self.serial_conn:
+        if not self.conectado or not self.serial_conn or not self.serial_conn.is_open:
             if messagebox:
                 messagebox.showwarning("Atencion", "Conecte el puerto serie antes de sincronizar calibracion.")
             return
@@ -1131,10 +1170,8 @@ class HMIRoverRockerBogieV21Pre:
         trama_calib = formatear_trama_calibracion(trims, servos)
 
         try:
-            with self.lock_serial:
-                if self.serial_conn and self.serial_conn.is_open:
-                    self.serial_conn.write(trama_calib.encode('ascii'))
-                    self.serial_conn.write(b"PERSIST_NVS\n")
+            self.serial_conn.write(trama_calib.encode('ascii'))
+            self.serial_conn.write(b"PERSIST_NVS\n")
             self.log_consola("TX", f"[CALIB]: {trama_calib.strip()} -> Guardado en NVS.")
             if messagebox:
                 messagebox.showinfo("Exito", "Calibracion sincronizada y persistida en memoria no volatil (NVS).")
@@ -1193,19 +1230,29 @@ class HMIRoverRockerBogieV21Pre:
         self.hilo_serial.start()
         self.hilo_joy = threading.Thread(target=self.bucle_recepcion_joy, daemon=True)
         self.hilo_joy.start()
+        self.hilo_reconexion = threading.Thread(target=self.bucle_reconexion_automatica, daemon=True)
+        self.hilo_reconexion.start()
+        self.hilo_tx_stream = threading.Thread(target=self.bucle_transmision_periodica, daemon=True)
+        self.hilo_tx_stream.start()
+
+    def bucle_transmision_periodica(self):
+        while self.ejecutando:
+            time.sleep(0.05)  # 20 Hz continuo
+            if self.conectado and self.serial_conn and self.serial_conn.is_open:
+                ahora = time.time()
+                if self._tx_pendiente or (self.comando_actual != "STOP" and ahora - self._ultimo_tiempo_tx >= 0.05):
+                    self.enviar_trama_actual(forzar=True)
 
     def bucle_recepcion_serial(self):
         while self.ejecutando:
-            if self.conectado and self.serial_conn:
+            if self.conectado and self.serial_conn and self.serial_conn.is_open:
                 try:
-                    linea = None
-                    with self.lock_serial:
-                        if self.serial_conn and self.serial_conn.is_open and self.serial_conn.in_waiting:
-                            linea = self.serial_conn.readline().decode('utf-8', errors='ignore').strip()
-                    if linea:
-                        self.procesar_linea_serial(linea)
-                except Exception:
-                    pass
+                    if self.serial_conn.in_waiting:
+                        linea = self.serial_conn.readline().decode('utf-8', errors='ignore').strip()
+                        if linea:
+                            self.procesar_linea_serial(linea)
+                except Exception as e:
+                    self.notificar_desconexion_abrupta(str(e))
             time.sleep(0.01)
 
     def procesar_linea_serial(self, linea):
@@ -1344,12 +1391,6 @@ class HMIRoverRockerBogieV21Pre:
             self.teclas_presionadas[k] = False
             self.evaluar_movimiento()
             return "break"
-
-    def evento_mouse_boton(self, key, presionado):
-        if key in self.teclas_presionadas:
-            if self.teclas_presionadas[key] != presionado:
-                self.teclas_presionadas[key] = presionado
-                self.evaluar_movimiento()
 
     def parar_emergencia(self):
         for k in self.teclas_presionadas:

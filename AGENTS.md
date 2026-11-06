@@ -1,300 +1,162 @@
-# GUÍA Y CONTEXTO TÉCNICO DEL PROYECTO: ROVER LUNAR V2.0
+# Guia para agentes y desarrolladores: Rover Lunar
 
-> **DOCUMENTO PARA AGENTES DE INTELIGENCIA ARTIFICIAL Y DESARROLLADORES**  
-> Este documento consolida todo el estado de conservación técnico, arquitectura de hardware, conexionado de pines, protocolo de comunicación y directrices de desarrollo para el proyecto **Rover Lunar V2.0**. Cualquier agente o desarrollador que intervenga en el repositorio debe seguir rigurosamente las especificaciones aquí descritas.
+Lee este archivo antes de tocar el repositorio. Despues lee `HANDOVER_SESION.md` (estado vivo) y `CHANGELOG.md`.
 
-> [!IMPORTANT]
-> **REGLA FUNDAMENTAL DE COMUNICACIÓN Y FORMATO: PROHIBICIÓN ESTRICTA DE EMOJIS**  
-> Queda terminantemente prohibido el uso de emojis en cualquier respuesta, documentación, código fuente, comentario, archivo o mensaje de commit. Todo agente de IA debe comunicarse y redactar con un estilo técnico, formal, limpio y sobrio, sin ningún tipo de emoticón o símbolo gráfico ornamental.
+**Sin emojis** en codigo, documentacion, commits ni respuestas. Estilo tecnico y directo, en espanol.
 
 ---
 
-## 1. Propósito del Proyecto y Visión General
+## 1. Regla principal: un solo archivo activo por pieza
 
-El objetivo primordial es el diseño, construcción y validación de una plataforma robótica de exploración móvil (**Rover Lunar V2.0**) equipada con un sistema de suspensión mecánica tipo **Rocker-Bogie**.
+El sistema activo son exactamente estos cuatro archivos. No puede haber otro firmware ni otra HMI en `01_Oficial/`.
 
-* **Misión Principal:** Sortear obstáculos pronunciados y pendientes críticas en entornos análogos simulados (ej. tubos de lava lunar y regolito simulado).
-* **Aplicaciones Industriales Terrestres Paralelas:** Inspección en espacios confinados y detección ambiental / monitoreo de gases en túneles y explotaciones mineras subterráneas.
+| Pieza | Archivo |
+|---|---|
+| Firmware del transmisor (Nano ESP32 conectado a la PC) | `01_Oficial/Transmisor_NanoESP32/Transmisor_NanoESP32.ino` |
+| Firmware del ejecutor (Nano ESP32 a bordo) | `01_Oficial/Ejecutor_NanoESP32/Ejecutor_NanoESP32.ino` |
+| HMI normal (pilotaje) | `01_Oficial/HMI/HMI_Rover.py` |
+| HMI debug (dos placas por USB, compara y grafica) | `01_Oficial/HMI/HMI_Rover_Debug.py` |
 
----
+`tests/test_estructura.py` falla si esta regla se rompe. CI lo ejecuta en cada push.
 
-## 2. Organización del Equipo y Distribución de Tareas
+### Como cambiar algo
 
-* **Joaquín:** Logro, calibración y validación de la comunicación inalámbrica por RF estable entre ambos microcontroladores.
-* **Lucas:** Diseño esquemático y ruteado de la placa PCB de montaje final para la electrónica de a bordo.
-* **Lucio y Sebastián:** Diseño, corrección y ensamble de los mecanismos físicos de tracción (motores amarillos DC con caja reductora) y dirección.
-* **Sebastián:** Adquisición de módulos de radiofrecuencia NRF24L01 y componentes de hardware.
-* **Emir:** Desarrollo y mantenimiento de los códigos de control del emisor, receptor y subsistema de cámara ESP32-CAM.
-* **Benjamín:** Mapeo y caracterización de zonas físicas de prueba (piso de pruebas CEPIT, rampa a 20°, terreno natural de Sierra) y misiones análogas de regolito lunar.
-* **Keila y Ainsworth:** Investigación física de la rodadura de ruedas, tracción y redacción del informe de aplicaciones industriales terrestres.
+1. **Mejora o correccion:** se edita el archivo activo. El historial queda en git. Prohibido crear `_v2`, `_pre`, `_nuevo`, `_final` o copias similares.
+2. **Experimento:** en una rama de git (`exp/descripcion`), nunca en una copia dentro de `main`.
+3. **Sketch de banco o prueba puntual:** en una rama o fuera del repositorio. Si tiene valor de referencia una vez terminado, va a `04_Deprecado/Bancos_de_Prueba/`.
+4. **Reemplazo completo de una pieza:** el archivo anterior se mueve con `git mv` a `04_Deprecado/` y se agrega una fila al indice `04_Deprecado/README.md` (que era, por que se reemplazo, que lo reemplaza). El nuevo toma el nombre fijo de la tabla.
+5. **Trabajo que todavia no se usa** (LiDAR, Rust, joystick): en `05_Futuro/`, nunca en `01_Oficial/`.
 
----
+### Al terminar cada cambio
 
-## 3. Reglas Críticas de Hardware y Seguridad (Lecciones Aprendidas)
-
-Cualquier intervención física o de software debe respetar las siguientes reglas obligatorias, originadas a partir de incidentes previos de laboratorio:
-
-> [!CAUTION]
-> **1. ALIMENTACIÓN DEL NRF24L01: NUNCA CONECTAR A 5V**  
-> El módulo NRF24L01 tolera 5V en sus pines lógicos SPI, pero **su línea VCC debe ser estrictamente alimentada con 3.3V**. Conectar VCC a 5V destruye la radio de inmediato.
-
-> [!IMPORTANT]
-> **2. CAPACITOR OBLIGATORIO EN LA RADIO**  
-> Es imprescindible soldar un capacitor electrolítico de entre **10 µF y 100 µF** directamente entre los pines **VCC** y **GND** del NRF24L01. Sin este capacitor, los picos transitorios de consumo durante la transmisión provocan caídas de tensión y pérdidas masivas de tramas.
-
-> [!WARNING]
-> **3. REGULACIÓN PARA SERVOMOTORES (PROHIBIDO LM7805)**  
-> En las primeras pruebas se quemó un servomotor SG90 al recibir 8V directos de batería, y los reguladores lineales tipo 7805 disipan un calor inaceptable bajo carga.  
-> Se debe utilizar **exclusivamente un regulador conmutado Step-Down (Buck)** ajustado a **5V - 6V** para alimentar los servos de dirección de manera aislada, compartiendo la tierra (GND común) con el microcontrolador.
-
-> [!IMPORTANT]
-> **4. LÍMITES DE ÁNGULO POR SOFTWARE (10° A 170°)**  
-> Para evitar trabas mecánicas, sobrecalentamiento y rotura de engranajes por esfuerzos de corte en los servos, **ningún comando de software puede solicitar ángulos fuera del rango seguro [10°, 170°]**.
+1. `python -m unittest discover -s tests` debe pasar.
+2. Si cambio el firmware, compilar los dos sketches con el nucleo real (seccion 6).
+3. Actualizar `CHANGELOG.md` y, si cambio el estado del proyecto, `HANDOVER_SESION.md`.
+4. Si cambio la arquitectura, el cableado o el protocolo, actualizar `README.md`, este archivo y el esquematico.
+5. Declarar por separado lo verificado en PC y lo verificado en hardware. Una prueba en PC no valida el hardware.
 
 ---
 
-## 4. Arquitectura de Conexión de Hardware (Pinout Fijo)
-
-### 4.1. Transmisor: ESP32-C3 SuperMini / LOLIN C3 Mini (Puente Serial-RF)
-Conectado a la PC por USB, recibe comandos por puerto serie y los transmite por RF24:
-
-| Pin NRF24L01 | Pin ESP32-C3 | Descripción / Detalle de Conexión |
-|---|---|---|
-| **VCC** | **3.3V** | Alimentación regulada (¡Nunca 5V!). Con capacitor electrolítico (10–100µF) a GND |
-| **GND** | **GND** | Tierra común |
-| **CE** | **GPIO 4** | Control de habilitación de radio |
-| **CSN** | **GPIO 7** | Chip Select (SS) |
-| **SCK** | **GPIO 6** | Reloj SPI de hardware |
-| **MOSI** | **GPIO 3** | Transmisión de datos SPI |
-| **MISO** | **GPIO 5** | Recepción de datos SPI |
-
----
-
-### 4.2. Receptor: Arduino MKR 1310 (Electrónica a Bordo del Rover)
-Montado en el chasis del rover, recibe las tramas RF y controla actuadores y motores:
-
-| Componente Físico | Pin del Módulo | Pin del Arduino MKR 1310 | Función / Observación |
-|---|---|---|---|
-| **NRF24L01** | VCC | **3.3V** | Salida 3.3V regulada del MKR (con capacitor 10–100µF a GND) |
-| **NRF24L01** | GND | **GND** | Tierra común del sistema |
-| **NRF24L01** | CE | **Pin Digital 0** | Habilitación de radio (Reubicado desde pin 4 para liberar PWM) |
-| **NRF24L01** | CSN | **Pin Digital 1** | Chip Select (Reubicado desde pin 5 para liberar PWM) |
-| **NRF24L01** | MOSI | **Pin Digital 8** | Bus SPI Hardware |
-| **NRF24L01** | SCK | **Pin Digital 9** | Bus SPI Hardware |
-| **NRF24L01** | MISO | **Pin Digital 10** | Bus SPI Hardware |
-| **Puente H L9110S** | A1A | **Pin Digital 2** | Motor Izquierdo - Señal de Avance (PWM) |
-| **Puente H L9110S** | A1B | **Pin Digital 5** | Motor Izquierdo - Señal de Reversa (PWM) *(¡Atención cableado!)* |
-| **Puente H L9110S** | B1A | **Pin Digital 3** | Motor Derecho - Señal de Avance (PWM) |
-| **Puente H L9110S** | B1B | **Pin Digital 4** | Motor Derecho - Señal de Reversa (PWM) |
-| **Servomotor S1** | PWM | **Pin Digital 6** | Señal de control de dirección 1 |
-| **Servomotor S2** | PWM | **Pin Digital 7** | Señal de control de dirección 2 |
-| **Regulador Step-Down**| Salida 5V | Alimentación Servos | Alimenta VCC de S1 y S2 de forma aislada de la lógica |
-
-> [!NOTE]
-> **Detalle crítico del Puente H L9110S:** Para lograr el sentido de rotación correcto, `A1B` debe conectarse físicamente al Pin 5 del MKR y `A1A` al Pin 2. En pruebas preliminares se descubrió que invertirlos bloqueaba la respuesta del motor. Además, reasignar la radio a los pines 0 y 1 fue obligatorio para liberar los pines 2, 3, 4 y 5 con capacidad PWM para el control bidireccional de ambos motores.
-
----
-
-### 4.3. Receptor Migrado: Arduino Nano ESP32 (Arquitectura Rocker-Bogie 6x6 + 4WS)
-Alternativa oficial al MKR 1310. Trabaja a **3.3V nativo** (ESP32-S3) con PWM por hardware en todos sus pines y deja libres pines analógicos y el bus I2C para telemetría:
-
-| Componente Físico | Pin del Módulo | Pin Arduino Nano ESP32 | Función / Observación |
-|---|---|---|---|
-| **NRF24L01** | VCC | **3.3V** | Alimentación lógica regulada (¡Nunca 5V!). Con capacitor 10–100µF |
-| **NRF24L01** | GND | **GND** | Tierra común |
-| **NRF24L01** | CE | **Pin D9** | Chip Enable (GPIO 18) |
-| **NRF24L01** | CSN | **Pin D10** | Chip Select SPI (GPIO 21) |
-| **NRF24L01** | MOSI | **Pin D11** | Bus SPI Hardware (GPIO 38) |
-| **NRF24L01** | MISO | **Pin D12** | Bus SPI Hardware (GPIO 47) |
-| **NRF24L01** | SCK | **Pin D13** | Bus SPI Hardware (GPIO 48) |
-| **Puente H L9110S** | A1A | **Pin D2** | Tracción Izquierda - Sentido de Avance (PWM) |
-| **Puente H L9110S** | A1B | **Pin D5** | Tracción Izquierda - Sentido de Reversa (PWM) |
-| **Puente H L9110S** | B1A | **Pin D3** | Tracción Derecha - Sentido de Avance (PWM) |
-| **Puente H L9110S** | B1B | **Pin D4** | Tracción Derecha - Sentido de Reversa (PWM) |
-| **Servomotor S1** | Señal | **Pin D6** | Dirección Rueda Delantera Izquierda |
-| **Servomotor S2** | Señal | **Pin D7** | Dirección Rueda Delantera Derecha |
-| **Servomotor S3** | Señal | **Pin D8** | Dirección Rueda Trasera Izquierda |
-| **Servomotor S4** | Señal | **Pin A0** | Dirección Rueda Trasera Derecha |
-| **Regulador Step-Down**| Salida 5V-6V | VCC Servos | Alimentación aislada para S1, S2, S3 y S4 (GND común) |
-
-*Consulte [ESQUEMATICO_NANO_ESP32.md](ESQUEMATICO_NANO_ESP32.md) para el pinout completo y los pines libres de expansión.*
-
----
-
-### 4.4. Transmisor Oficial: Arduino Nano ESP32 (Dongle USB-RF y Futuro Mando)
-Dispositivo de transmision oficial predeterminado (ESP32-S3 a 3.3V nativo). Recibe consignas por USB CDC a 115200 bps o por sticks analogicos, respondiendo a handshakes activos (`IDENT` -> `ID:NANO_ESP32:TX:v2.1`):
-
-| Componente Físico | Pin del Módulo | Pin Arduino Nano ESP32 | Función / Observación |
-|---|---|---|---|
-| **NRF24L01** | VCC | **3.3V** | Alimentación lógica regulada (¡Nunca 5V!). Con capacitor 10–100µF |
-| **NRF24L01** | GND | **GND** | Tierra común |
-| **NRF24L01** | CE | **Pin D9** | Chip Enable (GPIO 18) |
-| **NRF24L01** | CSN | **Pin D10** | Chip Select SPI (GPIO 21) |
-| **NRF24L01** | MOSI | **Pin D11** | Bus SPI Hardware (GPIO 38) |
-| **NRF24L01** | MISO | **Pin D12** | Bus SPI Hardware (GPIO 47) |
-| **NRF24L01** | SCK | **Pin D13** | Bus SPI Hardware (GPIO 48) |
-| **LED RGB Integrado** | Rojo | **GPIO 46** | Indicador de error / parada (Activo en bajo) |
-| **LED RGB Integrado** | Verde | **GPIO 0** | Indicador de transmisión RF exitosa (Activo en bajo) |
-| **LED RGB Integrado** | Azul | **GPIO 45** | Indicador de enlace USB activo (Activo en bajo) |
-
----
-
-## 5. Protocolo de Comunicación y Robustez de Software
-
-### 5.1. Estructura Binaria de Datos Unificada (Trama de 6 Bytes)
-Para evitar discrepancias de memoria y alineación de bytes entre arquitecturas heterogéneas (ESP32 con arquitectura RISC-V de 32 bits y Arduino MKR con microcontrolador SAMD21 ARM Cortex-M0+), el paquete se define con tipos enteros exactos y empaquetado estricto con `__attribute__((packed))`:
-
-```cpp
-struct __attribute__((packed)) Paquete {
-  int16_t traccion_izq;  // -255 a 255 (negativo: reversa, positivo: avance)
-  int16_t traccion_der;  // -255 a 255 (control independiente para calibración)
-  uint8_t angulo_s1;     // 10 a 170 grados (servomotor de dirección 1)
-  uint8_t angulo_s2;     // 10 a 170 grados (servomotor de dirección 2)
-};
-```
-* **Tamaño total:** Exactamente **6 bytes**.
-* Maximiza la tasa de transmisión por radio y minimiza el uso de CPU.
-
-### 5.2. Configuración de Radiofrecuencia NRF24L01
-* **Canal:** `108` (frecuencia: **2.508 GHz**). Se seleccionó deliberadamente por encima del espectro estándar de Wi-Fi de 2.4 GHz (canales 1 al 13) para evitar saturación e interferencias electromagnéticas.
-* **Potencia:** `RF24_PA_MAX` (máxima potencia de emisión).
-* **Tasa de datos (Data Rate):** `RF24_250KBPS` (baja velocidad para maximizar alcance, sensibilidad y penetración).
-
-### 5.3. Medidas de Robustez de Software Implementadas
-1. **Filtro Anti Key-Repeat en Python:** Las bibliotecas de interfaz gráfica en la PC generan ráfagas repetidas al mantener una tecla presionada. La GUI implementa un diccionario de estados (`teclas_presionadas`) para no inundar el puerto serie y enviar comandos solo cuando cambia el estado real de control.
-2. **Drenaje de Búfer RF en Arduino MKR:** Para impedir que la cola interna de 3 niveles de carga del NRF24L01 se desborde y congele el procesador SAMD21, el lazo de recepción vacía la pila rápidamente utilizando:
-   ```cpp
-   while (radio.available()) {
-       radio.read(&paquete, sizeof(Paquete));
-   }
-   ```
-   De esta manera, el actuador siempre procesa únicamente la trama más reciente y descarta datos obsoletos acumulados.
-3. **Máquina de Estados no bloqueante en ESP32:** Cero uso de `delay()`. Todas las secuencias y macros de pulso se calculan con base en `millis()`.
-4. **Failsafe de Emergencia por Timeout (1000 ms):** En el receptor MKR, si transcurren más de `1000 ms` (`TIMEOUT_MS`) sin recibir una trama válida de radio, se dispara de inmediato la rutina `pararMotores()`, previniendo que el vehículo continúe en movimiento sin control ante pérdidas de enlace.
-5. **Inversión Mecánica en Servomotores:** La macro de dirección en teclado envía 120° para la tecla `A` (giro a la izquierda) y 60° para la tecla `D` (giro a la derecha), compensando la orientación invertida con la que están montados los servos en el chasis físico.
-6. **Compensación de Motores en Tiempo Real:** Debido a discrepancias de fabricación en los motores amarillos de CC (el motor izquierdo rota con mayor velocidad que el derecho), la interfaz de control cuenta con sliders de calibración independiente de potencia PWM para nivelar la trayectoria recta en marcha.
-
-### 5.4. Matriz de Perfiles de Hardware, Flasher Engine y Stack Rust
-1. **Autodetección Pasiva y Handshake Activo:** El módulo `hardware_profiles.py` evalúa los USB VID:PID en el escaneo de puertos (Nano ESP32: `0x2341:0x0070`, ESP32-C3: `0x303A:0x1001`, MKR 1310: `0x2341:0x8054`) y corrobora activamente mediante `IDENT` -> `ID:<PLACA>:<ROL>:<VERSION>`. El perfil predeterminado oficial del proyecto es `ARDUINO_NANO_ESP32`.
-2. **Motor de Flasheo en 1 Clic (`flasher_engine.py`):** Permite compilar y subir firmware directamente desde la GUI mediante `arduino-cli` o fallback a `esptool` en un hilo secundario sin congelar Tkinter, gestionando el ciclo de vida del puerto serie (cierre temporal previo y reconexión automática tras arranque).
-3. **Sincronización Pre-Despliegue y Liberación de Puerto:** Soporta el flujo de banco de pruebas con doble conexión (TX + RX), enviando tramas `CALIB,m1..m6,s1..s4` y `PERSIST_NVS` para guardar en memoria no volátil, seguido del cierre seguro del puerto (`liberar_puerto`) para operación autónoma en campo por batería.
-4. **Stack Paralelo en Lenguaje Rust (`HMI-Lunar-Rover-Rust`):** Repositorio gemelo en Rust con arquitectura multi-crate:
-   - `protocol-rover`: Crate `#![no_std]` con el struct binario `PaqueteRover` empaquetado a 6 bytes exactos y asserts estáticos en tiempo de compilación.
-   - `hmi-gui`: Aplicación de escritorio nativa en `egui`/`eframe` con renderizado 2D por GPU del chasis Rocker-Bogie y trabajador serial desacoplado en hilos del sistema operativo mediante canales mpsc.
-   - `firmware-tx-esp32` y `firmware-rx-esp32`: Firmwares embebidos en Rust para el transmisor y receptor a bordo.
-
----
-
-## 6. Estructura del Repositorio
+## 2. Estructura
 
 ```text
-HMI-Lunar-Rover/
-│
-├── 01_Oficial/                                # Firmwares e interfaz en produccion
-│   ├── HMI/                                   # HMI_Rover_V2.py (GUI principal de pilotaje)
-│   ├── Receptor_Rover_NanoESP32/              # Ejecutor_ArduinoNano_ESP32.ino (Receptor Oficial)
-│   ├── Receptor_Rover_MKR1310/                # Ejecutor_ArduinoMKR_Optimizado.ino (Receptor previo)
-│   ├── Transmisor_PC_ESP32C3/                 # Control_ESP32_C3_Optimizado.ino (Puente USB-RF previo)
-│   └── Mando_Joystick_Fisico/                 # Joystick_Arduino_Nano.ino (Mando RC autonomo)
-│
-├── 02_Debug_y_Pruebas/                        # Herramientas de depuracion y laboratorio
-│   ├── HMI_Debug/                             # HMI_Rover_Debug.py, hardware_profiles.py, flasher_engine.py
-│   ├── Firmware_Debug/                        # Transmisor_ArduinoNano_ESP32.ino, firmwares de test
-│   ├── Test_RF_Unitarios/                     # Sketches de prueba de radiofrecuencia NRF24L01
-│   └── Lanzar_HMI_Debug.bat                   # Acceso directo al modo diagnostico y flasheo
-│
-├── 03_Documentacion_y_Guias/                  # Manuales y planos de conexionado
-│   ├── Guias/                                 # GUIA_RAPIDA_EQUIPO, ESTUDIO_VIABILIDAD_MAPEO_LIDAR_CAMARA_RUST
-│   └── Esquematicos/                          # ESQUEMATICO_NANO_ESP32 y ESQUEMATICO_MKR1310
-│
-├── 04_Legacy_y_Versiones_Previas/             # Archivos historicos o de grupos anteriores
-│   ├── WindowsFormsApp4/                      # Interfaz en C# / .NET del grupo anterior
-│   ├── WindowsFormsApp4.slnx
-│   ├── Firmwares_Historicos/                  # Codigos de referencia v0.1, v0.2, LOLIN, etc.
-│   ├── Interfaces_Historicas/                 # Scripts Python preliminares
-│   └── Documentos_Originales/                 # Contexto actual.docx original
-│
-├── Herramientas_Docker_Wine/                  # Simulacion de Windows limpio en contenedor
-│   ├── Dockerfile.wine-test                   # Definicion del entorno reproducible
-│   ├── run_simulation.sh                     # Runner de pruebas automatizadas
-│   ├── Simular_en_Docker.bat                  # Lanzador Windows (1 clic)
-│   └── Simular_en_Docker.sh                   # Lanzador Linux / WSL
-│
-│   ─── SOLO ARCHIVOS ESENCIALES EN LA RAIZ ───
-├── README.md                                  # Guia principal del proyecto y catalogo
-├── AGENTS.md                                  # Contexto tecnico para desarrolladores e IA
-├── Lanzar_HMI_Rover.bat                       # Lanzador inteligente en Windows (1 clic)
-├── Compilar_HMI_a_EXE.bat                     # Compilador de 1 clic a HMI_Rover_Lunar_V2.exe
-├── Subir_Cambios.bat                          # Sincronizador rapido con GitHub
-└── .gitignore                                 # Exclusiones de Git
-
-C:\Users\joaqu\Desktop\HMI-Lunar-Rover-Rust/   # Workspace paralelo nativo en Rust
-├── Cargo.toml                                 # Manifiesto raiz de workspace
-├── README.md                                  # Guia tecnica del stack en Rust
-├── crates/protocol-rover/                     # Crate no_std PaqueteRover (6 bytes)
-├── crates/hmi-gui/                            # Aplicacion de pilotaje nativa egui
-├── crates/firmware-tx-esp32/                  # Firmware transmisor en Rust
-└── crates/firmware-rx-esp32/                  # Firmware receptor en Rust
+01_Oficial/                 Los cuatro archivos activos
+03_Documentacion_y_Guias/   Esquematico vigente y material de estudio
+04_Deprecado/               Todo lo reemplazado, con indice. No se usa ni se modifica
+05_Futuro/                  Rust + LiDAR y joystick. Fuera de uso por ahora
+tests/                      Pruebas de estructura, firmware (banco en PC) y HMI
 ```
 
----
-
-## 7. Próximos Hitos y Hoja de Ruta
-
-1. **Validación en Rampa Diferencial (CEPIT):** Ensayos de descenso y ascenso por gravedad en rampa inclinada a 20° para verificar estabilidad estática y documentar error de tracción (tomando como base de modelado el rover indio *Pragyan* en la misión Chandrayaan-3).
-2. **Pruebas de Campo en Sierra (Terreno Natural):** Evaluación en sustrato irregular y ajuste dinámico bajo carga del par motor mediante calibración PWM.
-3. **Control en Lazo Cerrado:** Reemplazo de los motores amarillos básicos de corriente continua por motores con **encoders magnéticos de efecto Hall** de alta resolución para implementar algoritmos PID de velocidad y posición.
-4. **Placa PCB de Producción:** Finalización del esquemático y ruteado de la PCB por parte de Lucas para eliminar cableado tipo protoboard.
-5. **Telemetría de Visión Inalámbrica:** Montaje de módulo **ESP32-CAM** sobre un servo independiente de 180° para transmisión de video en tiempo real vía Wi-Fi, operando en red separada del canal de tracción por RF24.
-6. **Mapeo 3D en Entornos Confinados / Cuevas:** Implementación del sistema híbrido de escaneo mediante LiDAR 2D DToF (LDROBOT LD06) montado sobre servomotor de cabeceo (pitch de -45° a +45°) procesado y visualizado en la aplicación nativa en Rust (`hmi-gui`) para reconstrucción en tiempo real de nubes de puntos 3D. Consulte el estudio técnico completo en [`03_Documentacion_y_Guias/Guias/ESTUDIO_VIABILIDAD_MAPEO_LIDAR_CAMARA_RUST.md`](03_Documentacion_y_Guias/Guias/ESTUDIO_VIABILIDAD_MAPEO_LIDAR_CAMARA_RUST.md).
+En la raiz solo hay documentos principales (`README.md`, `AGENTS.md`, `CHANGELOG.md`, `HANDOVER_SESION.md`) y lanzadores `.bat`.
 
 ---
 
-## 8. Guía para Agentes de IA al Modificar Código
-
-Cualquier agente que proponga cambios o refactorizaciones debe:
-1. **Preservar el empaquetado binario:** Nunca modificar campos de la estructura `Paquete` sin sincronizar simultáneamente el script de Python, el código del ESP32-C3 y el código del Arduino MKR 1310.
-2. **Respetar la restricción anti-bloqueo:** Nunca introducir llamadas a `delay()` en la lógica de transmisión ni recepción.
-3. **Mantener los límites de seguridad de actuadores:** No programar valores angulares fuera de `[10, 170]` grados y conservar la rutina de parada en caso de pérdida de enlace (`TIMEOUT_MS = 1000`).
-4. **Conservar las frecuencias asignadas:** Mantener el canal RF en 108 a 250 kbps a menos que se realice una reconfiguración coordinada de radio en ambos firmwares.
-5. **Cero uso de emojis (Regla Estricta):** Queda terminantemente prohibido utilizar emojis en explicaciones, comentarios, documentación, commits o respuestas. El usuario detesta los emojis; utilizar únicamente texto sobrio, formal y directo.
-6. **Politica Obligatoria de Versionado (Beta -> Pre-Release -> Release):** Nunca realizar modificaciones experimentales directamente sobre los archivos estables de `01_Oficial/`. Todo cambio debe transitar obligatoriamente por el flujo:
-   - **Fase Beta:** Cambios experimentales, pruebas unitarias y bancos de prueba en `02_Debug_y_Pruebas/` o con sufijo `_beta`. Registro obligatorio en [`CHANGELOG.md`](CHANGELOG.md).
-   - **Fase Pre-Release:** Consolidacion de componentes validados funcionalmente en banco (ej. `v2.2-pre`).
-   - **Fase Release:** Promocion formal a produccion estable en `01_Oficial/` unicamente cuando la actualizacion completa este validada y aprobada por el usuario.
-7. **Protocolo de Continuidad de Sesion (Context Handover):** Al iniciar cualquier conversacion nueva o tras sesiones extensas, el agente debe consultar [`HANDOVER_SESION.md`](HANDOVER_SESION.md) y [`CHANGELOG.md`](CHANGELOG.md) para sincronizar inmediatamente el estado del proyecto sin perdida de informacion. Al completar cambios significativos, se deben actualizar ambos archivos.
-
----
-
-## 9. Politica de Ciclo de Vida y Versionado
-
-Cualquier modificacion en el repositorio (firmwares de Arduino/ESP32, interfaces Python HMI, modulos de debug o el stack nativo en Rust) debe seguir el ciclo estricto de maduracion:
+## 3. Arquitectura vigente
 
 ```text
-[Desarrollo / Feature / Fix]
-          │
-          ▼
-   ┌──────────────┐
-   │  FASE BETA   │  --> Mini-versiones beta y ramas de prueba en 02_Debug_y_Pruebas/
-   └──────┬───────┘      Registro obligatorio de cambios en CHANGELOG.md
-          │
-          ▼  (Validacion funcional en hardware y bancos de prueba)
-   ┌──────────────┐
-   │ PRE-RELEASE  │  --> Consolidacion multi-subsistema (ej. v2.1-pre, v2.2-pre)
-   └──────┬───────┘      Verificacion de interoperabilidad HMI <-> TX <-> RX
-          │
-          ▼  (Hito completo y aprobado sin regresiones)
-   ┌──────────────┐
-   │   RELEASE    │  --> Despliegue formal en 01_Oficial/ (ej. v2.1 Oficial Estable)
-   └──────────────┘      Actualizacion de lanzadores (Lanzar_HMI_Rover.bat, etc.)
+HMI (PC) --USB 115200--> Nano ESP32 transmisor --WiFi UDP 4210--> Nano ESP32 ejecutor --> Motores y servos
+         <--------------                       <-- telemetria ---
 ```
+
+- El transmisor es el Access Point `ROVER_NET` (192.168.4.1, canal 6). Va alimentado por USB, por eso la emision permanente queda de ese lado.
+- El ejecutor es estacion con IP fija 192.168.4.2.
+- El nRF24L01 y el MKR 1310 ya no se usan.
+
+### Pines del ejecutor
+
+| Funcion | Pin |
+|---|---|
+| L9110S A1A / A1B (lado izquierdo) | D2 / D5 |
+| L9110S B1A / B1B (lado derecho) | D3 / D4 |
+| PCA9685 SDA / SCL | A4 / A5 |
+| Servos S1 / S2 / S3 / S4 | Canales 0 / 1 / 2 / 3 del PCA9685 |
+
+El rover lleva 3 modulos L9110S dobles comandados en paralelo, que es el valor por defecto (`PUENTE_H_L298N 0`), con `INVERTIR_IZQ` e `INVERTIR_DER` en `true` (validado en el rover). Con `PUENTE_H_L298N 1` el firmware usa L298N: ENA/IN1/IN2 en D2/D3/D4 y ENB/IN3/IN4 en D5/D6/D7. Las pruebas compilan las dos variantes.
+
+Los GPIO 14, 25, 26, 27, 32 y 33 de versiones anteriores son numeracion de ESP32 clasico. No usarlos en esta placa.
 
 ---
 
-## 10. Protocolo de Traspaso de Sesion (Context Handover)
+## 4. Protocolo
 
-Para mitigar el consumo excesivo de tokens y la degradacion de contexto en conversaciones largas con la IA:
-1. **Archivo Maestro:** [`HANDOVER_SESION.md`](HANDOVER_SESION.md) contiene la fotografia completa del estado del hardware, pinouts, puertos USB, bugs resueltos, versiones activas y tareas inmediatas.
-2. **Procedimiento para Nuevas Conversaciones:** El usuario puede iniciar una nueva sesion solicitando simplemente: *"Lee HANDOVER_SESION.md y continuemos con [tarea]"*. El agente cargara de inmediato todo el contexto tecnico sin necesidad de reexplicar antecedentes ni perder configuraciones previas.
-3. **Mantenimiento:** Cada agente que concluya un bloque de trabajo relevante debe actualizar [`HANDOVER_SESION.md`](HANDOVER_SESION.md) y [`CHANGELOG.md`](CHANGELOG.md) antes de cerrar su intervencion.
+**HMI a transmisor:** `CMD,izq,der,s1,s2,s3,s4`, `STOP`, `IDENT`, `PING`. Los PWM llevan signo real.
 
+**Mando de la HMI:** direccion y traccion separadas. `A`, `D`, `Q` y `E` solo orientan las ruedas; solo `W` y `S` mueven los motores. Lo define `calcular_consigna` en `HMI_Rover.py` y lo cubren las pruebas de `TestCinematica`.
+
+**Placas a PC:** `TX,...`, `RX,...`, `TLM,...`, `LINK,...`, `BOOT,...`, `ID:NANO_ESP32:<TX|RX>:<version>`. El formato exacto esta en la cabecera de cada firmware y en `CAMPOS_*` de `HMI_Rover.py`.
+
+**Transmisor y ejecutor por UDP:** binario `PaqueteControl` (13 bytes) y `PaqueteTelemetria` (34 bytes), con CRC-8.
+
+Un cambio de protocolo se hace a la vez en los dos `.ino` y en `HMI_Rover.py`, y sube `VERSION_FW`. Las pruebas verifican que las estructuras y los formatos coincidan.
+
+---
+
+## 5. Reglas obligatorias de seguridad
+
+Vienen de incidentes reales.
+
+**Software**
+
+1. Angulos de servo siempre en `[10, 170]`. Un pulso fuera de rango deja al servo forzando contra el tope, consumiendo corriente de bloqueo.
+2. El ejecutor debe parar motores y centrar servos tras `TIMEOUT_MS = 1000` sin tramas. El transmisor debe ordenar parada tras `HMI_TIMEOUT_MS = 500` sin consignas.
+3. Sin `delay()` en firmware: todo con `millis()`. La salida USB nunca debe bloquear el lazo.
+4. La HMI debe enviar consignas de forma continua a 20 Hz. Enviar solo al cambiar una tecla dispara los failsafes.
+5. No quitar los limitadores de corriente del ejecutor (rampas, desfase, servos escalonados, fases del PCA9685, arranque por etapas) sin una medicion que lo justifique.
+6. No desactivar el detector de brownout: oculta el problema y arriesga corromper la memoria.
+
+**Hardware**
+
+1. Motores, servos y logica en rieles separados con masa comun en estrella. Detalle en `03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md`.
+2. Servos alimentados solo por regulador conmutado (buck o UBEC) a 5-6 V. Nunca por el Arduino, ni por regulador lineal tipo 7805, ni directo de bateria (asi se quemo un SG90 a 8 V).
+3. El USB de la PC no puede alimentar motores ni servos.
+
+---
+
+## 6. Verificacion
+
+```bash
+python -m unittest discover -s tests
+
+arduino-cli core install arduino:esp32
+arduino-cli lib install "Adafruit PWM Servo Driver Library"
+arduino-cli compile --fqbn arduino:esp32:nano_nora 01_Oficial/Transmisor_NanoESP32
+arduino-cli compile --fqbn arduino:esp32:nano_nora 01_Oficial/Ejecutor_NanoESP32
+```
+
+- `tests/test_firmware.py` ejecuta los `.ino` reales en la PC con hardware simulado (requiere g++). Valida la logica, no las bibliotecas reales ni la electronica.
+- `tests/banco_firmware/stubs/` debe seguir la API real de Arduino. Si el firmware usa una funcion nueva, agregarla con la misma firma.
+- Las pruebas de interfaz requieren Tkinter y se omiten donde no este (por ejemplo, WSL sin `python3-tk`).
+
+### Release
+
+Una release publica `HMI_Rover.exe`, `HMI_Rover_Debug.exe` y los `.bin` de los dos firmwares, para usar el rover sin instalar nada. La arma `.github/workflows/release.yml`:
+
+1. Con todo unido en `main`, actualizar `CHANGELOG.md` y la version en `HMI_Rover.py` (y `VERSION_FW` si cambio el protocolo).
+2. `git tag vX.Y` en `main` y `git push origin vX.Y`.
+3. El workflow compila, prueba que cada `.exe` arranque y crea la release como **borrador**. Completar las notas desde el `CHANGELOG.md` y publicarla.
+
+En cada PR que toque `01_Oficial/` el mismo workflow genera los archivos sin publicarlos, para verificar que compilan.
+
+Si Actions no esta disponible, la release se arma a mano: los `.exe` con PyInstaller (mismos comandos que el workflow) y los firmwares como `.zip` con las dos carpetas de sketch, subidos con `gh release create`.
+
+---
+
+## 7. Equipo
+
+- **Joaquin:** comunicacion inalambrica.
+- **Lucas:** PCB.
+- **Lucio y Sebastian:** mecanismos de traccion y direccion. **Sebastian:** adquisicion de componentes.
+- **Emir:** firmware del transmisor, ejecutor y camara.
+- **Benjamin:** zonas de prueba y misiones analogas.
+- **Keila y Ainsworth:** fisica de rodadura e informe de aplicaciones.
+
+---
+
+## 8. Hoja de ruta
+
+1. v3.0 validada en el rover con L9110S. Probar el mando de la v3.1 y publicar la HMI como ejecutable.
+2. Ensayos en rampa a 20 grados (CEPIT) y en terreno natural (Sierra).
+3. Joystick fisico (`05_Futuro/Joystick/`).
+4. Encoders y control PID.
+5. PCB definitiva.
+6. Camara ESP32-CAM, LiDAR y HMI en Rust (`05_Futuro/Rust_LiDAR/`).

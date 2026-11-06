@@ -269,4 +269,7 @@ void loop() {
     ultimoEnvio = millis();
     enviarPaqueteInalambrico();
   }
+
+  // Ceder CPU y alimentar Task Watchdog del ESP32-C3
+  delay(2);
 }
