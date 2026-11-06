@@ -66,12 +66,12 @@ HMI (PC) --USB 115200--> Nano ESP32 transmisor --WiFi UDP 4210--> Nano ESP32 eje
 
 | Funcion | Pin |
 |---|---|
-| L298N ENA / IN1 / IN2 (lado izquierdo) | D2 / D3 / D4 |
-| L298N ENB / IN3 / IN4 (lado derecho) | D5 / D6 / D7 |
+| L9110S A1A / A1B (lado izquierdo, avance / reversa) | D2 / D5 |
+| L9110S B1A / B1B (lado derecho, avance / reversa) | D3 / D4 |
 | PCA9685 SDA / SCL | A4 / A5 |
 | Servos S1 / S2 / S3 / S4 | Canales 0 / 1 / 2 / 3 del PCA9685 |
 
-Con `PUENTE_H_L298N 0` el firmware usa L9110S: A1A D2, A1B D5, B1A D3, B1B D4.
+El rover lleva L9110S, que es el valor por defecto (`PUENTE_H_L298N 0`). Con `PUENTE_H_L298N 1` el firmware usa L298N: ENA/IN1/IN2 en D2/D3/D4 y ENB/IN3/IN4 en D5/D6/D7. Las pruebas compilan las dos variantes.
 
 Los GPIO 14, 25, 26, 27, 32 y 33 de versiones anteriores son numeracion de ESP32 clasico. No usarlos en esta placa.
 
@@ -80,6 +80,8 @@ Los GPIO 14, 25, 26, 27, 32 y 33 de versiones anteriores son numeracion de ESP32
 ## 4. Protocolo
 
 **HMI a transmisor:** `CMD,izq,der,s1,s2,s3,s4`, `STOP`, `IDENT`, `PING`. Los PWM llevan signo real.
+
+**Mando de la HMI:** direccion y traccion separadas. `A`, `D`, `Q` y `E` solo orientan las ruedas; solo `W` y `S` mueven los motores. Lo define `calcular_consigna` en `HMI_Rover.py` y lo cubren las pruebas de `TestCinematica`.
 
 **Placas a PC:** `TX,...`, `RX,...`, `TLM,...`, `LINK,...`, `BOOT,...`, `ID:NANO_ESP32:<TX|RX>:<version>`. El formato exacto esta en la cabecera de cada firmware y en `CAMPOS_*` de `HMI_Rover.py`.
 
@@ -140,7 +142,7 @@ arduino-cli compile --fqbn arduino:esp32:nano_nora 01_Oficial/Ejecutor_NanoESP32
 
 ## 8. Hoja de ruta
 
-1. Validar v3.0 en banco y medir si persisten los brownouts.
+1. v3.0 validada en el rover con L9110S. Probar el mando de la v3.1 y publicar la HMI como ejecutable.
 2. Ensayos en rampa a 20 grados (CEPIT) y en terreno natural (Sierra).
 3. Joystick fisico (`05_Futuro/Joystick/`).
 4. Encoders y control PID.

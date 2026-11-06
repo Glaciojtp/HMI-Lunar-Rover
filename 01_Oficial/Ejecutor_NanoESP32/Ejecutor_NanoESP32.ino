@@ -53,9 +53,11 @@
 #define VERSION_FW "v3.0"
 
 // ---------------------------------------------------------------------------
-// Puente H: 1 = L298N, 0 = L9110S
+// Puente H: 0 = L9110S (el montado en el rover), 1 = L298N
 // ---------------------------------------------------------------------------
-#define PUENTE_H_L298N 1
+#ifndef PUENTE_H_L298N
+#define PUENTE_H_L298N 0
+#endif
 
 #if PUENTE_H_L298N
 const uint8_t PIN_ENA = D2;  // PWM lado izquierdo

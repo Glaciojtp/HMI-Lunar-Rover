@@ -17,8 +17,10 @@ INO_TX = RAIZ / "01_Oficial/Transmisor_NanoESP32/Transmisor_NanoESP32.ino"
 INO_RX = RAIZ / "01_Oficial/Ejecutor_NanoESP32/Ejecutor_NanoESP32.ino"
 BANCO = RAIZ / "tests/banco_firmware"
 
-# Pines L298N por defecto (D2..D7 valen 2..7 en los stubs)
-ENA, IN1, IN2, ENB = 2, 3, 4, 5
+# D2..D7 valen 2..7 en los stubs
+ENA, IN1, IN2, ENB = 2, 3, 4, 5              # L298N (PUENTE_H_L298N=1)
+A1A, A1B, B1A, B1B = 2, 5, 3, 4              # L9110S (por defecto)
+L298N = ("PUENTE_H_L298N=1",)
 ARRANQUE_MS = 1700
 
 
@@ -46,21 +48,22 @@ class Binario:
     cache = {}
 
     @classmethod
-    def obtener(cls, ino):
-        if ino not in cls.cache:
+    def obtener(cls, ino, defines=()):
+        clave = (ino, defines)
+        if clave not in cls.cache:
             if cls.directorio is None:
                 cls.directorio = tempfile.mkdtemp(prefix="banco_rover_")
-            salida = Path(cls.directorio) / ino.stem
+            salida = Path(cls.directorio) / (ino.stem + "".join("_" + d.replace("=", "") for d in defines))
             subprocess.run(
-                ["g++", "-std=c++17", "-Wall", f"-I{BANCO / 'stubs'}", "-x", "c++", str(ino),
-                 "-x", "c++", str(BANCO / "banco.cpp"), "-o", str(salida)],
+                ["g++", "-std=c++17", "-Wall", *(f"-D{d}" for d in defines), f"-I{BANCO / 'stubs'}",
+                 "-x", "c++", str(ino), "-x", "c++", str(BANCO / "banco.cpp"), "-o", str(salida)],
                 check=True, capture_output=True, text=True)
-            cls.cache[ino] = str(salida)
-        return cls.cache[ino]
+            cls.cache[clave] = str(salida)
+        return cls.cache[clave]
 
 
-def ejecutar(ino, guion):
-    r = subprocess.run([Binario.obtener(ino)], input="\n".join(guion) + "\n",
+def ejecutar(ino, guion, defines=()):
+    r = subprocess.run([Binario.obtener(ino, defines)], input="\n".join(guion) + "\n",
                        capture_output=True, text=True, check=True, timeout=60)
     eventos = []
     for linea in r.stdout.splitlines():
@@ -95,7 +98,7 @@ def seriales(eventos, prefijo):
 @unittest.skipUnless(shutil.which("g++"), "Requiere g++")
 class TestEjecutor(unittest.TestCase):
     def test_arranque_centra_servos_de_a_uno_y_despues_inicia_wifi(self):
-        ev = ejecutar(INO_RX, ["P 1", "C 1", "I", f"A {ARRANQUE_MS}"])
+        ev = ejecutar(INO_RX, ["P 1", "C 1", "I", f"A {ARRANQUE_MS}"], L298N)
         servos = pca(ev)
         self.assertEqual([s[1] for s in servos], [0, 1, 2, 3])
         for a, b in zip(servos, servos[1:]):
@@ -104,12 +107,12 @@ class TestEjecutor(unittest.TestCase):
         self.assertGreater(t_wifi, servos[-1][0])
 
     def test_motores_quedan_apagados_en_el_arranque(self):
-        ev = ejecutar(INO_RX, ["P 1", "C 1", "I", "A 20"])
+        ev = ejecutar(INO_RX, ["P 1", "C 1", "I", "A 20"], L298N)
         self.assertTrue(pwm(ev, ENA))
         self.assertTrue(all(v == 0 for _, v in pwm(ev, ENA) + pwm(ev, ENB)))
 
     def test_rampa_limita_el_salto_de_pwm(self):
-        ev = ejecutar(INO_RX, ejecutor_operando(*stream(1, 30, izq=255, der=255)))
+        ev = ejecutar(INO_RX, ejecutor_operando(*stream(1, 30, izq=255, der=255)), L298N)
         for pin in (ENA, ENB):
             valores = [v for _, v in pwm(ev, pin)]
             self.assertEqual(valores[-1], 255)
@@ -117,14 +120,14 @@ class TestEjecutor(unittest.TestCase):
                 self.assertLessEqual(abs(b - a), 4)
 
     def test_los_dos_lados_no_arrancan_en_el_mismo_instante(self):
-        ev = ejecutar(INO_RX, ejecutor_operando(*stream(1, 10, izq=200, der=200)))
+        ev = ejecutar(INO_RX, ejecutor_operando(*stream(1, 10, izq=200, der=200)), L298N)
         t_izq = next(t for t, v in pwm(ev, ENA) if v > 0)
         t_der = next(t for t, v in pwm(ev, ENB) if v > 0)
         self.assertGreaterEqual(abs(t_der - t_izq), 60)
 
     def test_inversion_pasa_por_cero_con_pausa(self):
         guion = ejecutor_operando(*stream(1, 20, izq=120), *stream(21, 30, izq=-120))
-        ev = ejecutar(INO_RX, guion)
+        ev = ejecutar(INO_RX, guion, L298N)
         eventos_pwm = pwm(ev, ENA)
         ultimo_cero = max(t for t, v in eventos_pwm if v == 0)
         t_rev = next(t for t, e in ev if e == f"DW {IN2} 1")
@@ -134,7 +137,7 @@ class TestEjecutor(unittest.TestCase):
         self.assertEqual(eventos_pwm[-1][1], 120)
 
     def test_servos_una_escritura_por_tick_y_velocidad_limitada(self):
-        ev = ejecutar(INO_RX, ejecutor_operando(*stream(1, 40, servos=(150, 30, 150, 30))))
+        ev = ejecutar(INO_RX, ejecutor_operando(*stream(1, 40, servos=(150, 30, 150, 30))), L298N)
         arranque = [s for s in pca(ev) if s[0] > ARRANQUE_MS]
         tiempos = [s[0] for s in arranque]
         self.assertEqual(len(tiempos), len(set(tiempos)))
@@ -152,13 +155,13 @@ class TestEjecutor(unittest.TestCase):
         self.assertEqual(por_canal[1][-1], angulo_a_ticks(30))
 
     def test_pulsos_del_pca_tienen_fases_distintas_y_validas(self):
-        ev = ejecutar(INO_RX, ["P 1", "C 1", "I", f"A {ARRANQUE_MS}"])
+        ev = ejecutar(INO_RX, ["P 1", "C 1", "I", f"A {ARRANQUE_MS}"], L298N)
         fases = [s[2] for s in pca(ev)]
         self.assertEqual(fases, [0, 1024, 2048, 3072])
         self.assertTrue(all(s[3] < 4096 for s in pca(ev)))
 
     def test_angulos_fuera_de_rango_se_limitan(self):
-        ev = ejecutar(INO_RX, ejecutor_operando(*stream(1, 80, servos=(255, 0, 180, 5))))
+        ev = ejecutar(INO_RX, ejecutor_operando(*stream(1, 80, servos=(255, 0, 180, 5))), L298N)
         ticks = {}
         for t, canal, on, off in pca(ev):
             ticks[canal] = off - on
@@ -168,7 +171,7 @@ class TestEjecutor(unittest.TestCase):
         self.assertEqual(ticks[3], angulo_a_ticks(10))
 
     def test_crc_incorrecto_no_mueve_nada_y_se_cuenta(self):
-        ev = ejecutar(INO_RX, ejecutor_operando(f"U {trama(1, izq=200, crc_ok=False)}", "A 300"))
+        ev = ejecutar(INO_RX, ejecutor_operando(f"U {trama(1, izq=200, crc_ok=False)}", "A 300"), L298N)
         self.assertTrue(all(v == 0 for _, v in pwm(ev, ENA)))
         tlm = seriales(ev, "TLM")[-1].split(",")
         self.assertEqual(tlm[14], "1")  # crc malos
@@ -176,7 +179,7 @@ class TestEjecutor(unittest.TestCase):
 
     def test_failsafe_a_los_1000_ms_para_motores_y_centra_lento(self):
         guion = ejecutor_operando(*stream(1, 30, izq=255, der=255, servos=(150, 150, 150, 150)), "A 2500")
-        ev = ejecutar(INO_RX, guion)
+        ev = ejecutar(INO_RX, guion, L298N)
         t_fs = next(t for t, e in ev if e == "SER WARN:FAILSAFE")
         t_ultima = ARRANQUE_MS + 30 * 50 - 50
         self.assertGreaterEqual(t_fs - t_ultima, 1000)
@@ -189,12 +192,12 @@ class TestEjecutor(unittest.TestCase):
 
     def test_recupera_operacion_tras_failsafe(self):
         guion = ejecutor_operando(*stream(1, 5, izq=100), "A 1500", *stream(6, 10, izq=100))
-        ev = ejecutar(INO_RX, guion)
+        ev = ejecutar(INO_RX, guion, L298N)
         self.assertEqual(seriales(ev, "TLM")[-1].split(",")[16], "2")
 
     def test_flag_de_emergencia_corta_motores_sin_rampa(self):
         guion = ejecutor_operando(*stream(1, 30, izq=200), f"U {trama(31, flags=1)}", "A 2")
-        ev = ejecutar(INO_RX, guion)
+        ev = ejecutar(INO_RX, guion, L298N)
         valores = pwm(ev, ENA)
         self.assertEqual(valores[-1][1], 0)
         self.assertGreater(valores[-2][1], 100)
@@ -202,25 +205,25 @@ class TestEjecutor(unittest.TestCase):
     def test_duplicadas_se_descartan_y_perdidas_se_cuentan(self):
         guion = ejecutor_operando(f"U {trama(10)}", "A 50", f"U {trama(10)}", "A 50",
                                   f"U {trama(14)}", "A 300")
-        ev = ejecutar(INO_RX, guion)
+        ev = ejecutar(INO_RX, guion, L298N)
         tlm = seriales(ev, "TLM")[-1].split(",")
         self.assertEqual(tlm[12], "2")  # validas
         self.assertEqual(tlm[13], "3")  # perdidas 11, 12, 13
 
     def test_informa_causa_de_reset_por_brownout(self):
-        ev = ejecutar(INO_RX, ["P 1", "C 9", "I", f"A {ARRANQUE_MS}", "W 1", "A 300"])
+        ev = ejecutar(INO_RX, ["P 1", "C 9", "I", f"A {ARRANQUE_MS}", "W 1", "A 300"], L298N)
         self.assertTrue(seriales(ev, "BOOT,9,"))
         self.assertEqual(seriales(ev, "TLM")[-1].split(",")[9], "9")
 
     def test_sin_pca_sigue_funcionando_y_lo_informa(self):
-        ev = ejecutar(INO_RX, ["P 0", "C 1", "I", f"A {ARRANQUE_MS}", "W 1", *stream(1, 30, izq=100)])
+        ev = ejecutar(INO_RX, ["P 0", "C 1", "I", f"A {ARRANQUE_MS}", "W 1", *stream(1, 30, izq=100)], L298N)
         self.assertTrue(seriales(ev, "ERR:PCA9685"))
         self.assertEqual(pca(ev), [])
         self.assertEqual(pwm(ev, ENA)[-1][1], 100)
         self.assertEqual(seriales(ev, "TLM")[-1].split(",")[17], "0")
 
     def test_wifi_con_canal_e_ip_fijos_y_potencia_reducida(self):
-        ev = ejecutar(INO_RX, ["P 1", "C 1", "I", f"A {ARRANQUE_MS}"])
+        ev = ejecutar(INO_RX, ["P 1", "C 1", "I", f"A {ARRANQUE_MS}"], L298N)
         textos = [e for _, e in ev]
         self.assertIn("WIFI config 192.168.4.2", textos)
         self.assertIn("WIFI begin ROVER_NET 6", textos)
@@ -287,6 +290,52 @@ class TestTransmisor(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("g++"), "Requiere g++")
+class TestEjecutorL9110S(unittest.TestCase):
+    """Compilacion por defecto: el rover lleva L9110S."""
+
+    def ultimo(self, ev, pin):
+        return pwm(ev, pin)[-1][1]
+
+    def test_motores_quedan_apagados_en_el_arranque(self):
+        ev = ejecutar(INO_RX, ["P 1", "C 1", "I", "A 20"])
+        for pin in (A1A, A1B, B1A, B1B):
+            self.assertTrue(pwm(ev, pin), pin)
+            self.assertTrue(all(v == 0 for _, v in pwm(ev, pin)), pin)
+
+    def test_cada_sentido_sale_por_su_pin(self):
+        ev = ejecutar(INO_RX, ejecutor_operando(*stream(1, 60, izq=150, der=-100)))
+        self.assertEqual([self.ultimo(ev, p) for p in (A1A, A1B, B1A, B1B)], [150, 0, 0, 100])
+
+    def test_pivote_mueve_los_dos_lados_en_sentidos_opuestos(self):
+        ev = ejecutar(INO_RX, ejecutor_operando(*stream(1, 60, izq=-200, der=200, servos=(45, 135, 135, 45))))
+        self.assertEqual([self.ultimo(ev, p) for p in (A1A, A1B, B1A, B1B)], [0, 200, 200, 0])
+        for pin in (A1B, B1A):
+            valores = [v for _, v in pwm(ev, pin)]
+            for a, b in zip(valores, valores[1:]):
+                self.assertLessEqual(abs(b - a), 4)
+
+    def test_inversion_pasa_por_cero_y_nunca_activa_los_dos_pines(self):
+        ev = ejecutar(INO_RX, ejecutor_operando(*stream(1, 20, izq=120), *stream(21, 30, izq=-120)))
+        avance = reversa = 0
+        hubo_avance = False
+        t_cero = t_rev = None
+        for t, e in ev:
+            if e.startswith(f"PWM {A1A} "):
+                avance = int(e.split()[2])
+                hubo_avance = hubo_avance or avance > 0
+                if avance == 0 and hubo_avance and t_cero is None:
+                    t_cero = t
+            elif e.startswith(f"PWM {A1B} "):
+                reversa = int(e.split()[2])
+                if reversa > 0 and t_rev is None:
+                    t_rev = t
+            self.assertFalse(avance > 0 and reversa > 0)
+        self.assertIsNotNone(t_cero)
+        self.assertGreaterEqual(t_rev - t_cero, 80)
+        self.assertEqual(self.ultimo(ev, A1B), 120)
+
+
+@unittest.skipUnless(shutil.which("g++"), "Requiere g++")
 class TestExtremoAExtremo(unittest.TestCase):
     def test_comando_de_hmi_llega_al_ejecutor_y_telemetria_vuelve(self):
         guion_tx = ["I", "W 1"]
@@ -298,7 +347,7 @@ class TestExtremoAExtremo(unittest.TestCase):
         guion_rx = ejecutor_operando()
         for h in tramas:
             guion_rx += [f"U {h}", "A 50"]
-        ev_rx = ejecutar(INO_RX, guion_rx)
+        ev_rx = ejecutar(INO_RX, guion_rx, L298N)
         self.assertEqual(pwm(ev_rx, ENA)[-1][1], 180)
         self.assertEqual(pwm(ev_rx, ENB)[-1][1], 90)
         self.assertIn(f"DW {IN1} 1", [e for _, e in ev_rx])
@@ -314,7 +363,7 @@ class TestExtremoAExtremo(unittest.TestCase):
         self.assertEqual(linea[16], "2")
 
     def test_telemetria_corrupta_no_se_reenvia(self):
-        ev_rx = ejecutar(INO_RX, ejecutor_operando("A 250"))
+        ev_rx = ejecutar(INO_RX, ejecutor_operando("A 250"), L298N)
         h = next(e.split()[2] for _, e in ev_rx if e.startswith("UDP 192.168.4.1"))
         malo = bytes.fromhex(h)
         malo = (malo[:-1] + bytes([malo[-1] ^ 0xFF])).hex()

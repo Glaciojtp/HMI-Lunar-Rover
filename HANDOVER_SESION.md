@@ -2,25 +2,25 @@
 
 Lectura obligatoria al iniciar una sesion, junto con `AGENTS.md` y `CHANGELOG.md`. Actualizar al terminar cada bloque de trabajo. Sin emojis.
 
-Ultima actualizacion: 2026-11-02.
+Ultima actualizacion: 2026-11-06.
 
 ## Estado
 
 | Item | Estado |
 |---|---|
-| Version activa | v3.0 |
+| Version activa | v3.1 (HMI). Firmwares y protocolo v3.0 |
 | Pruebas en PC (`tests/`) | Pasan |
 | Compilacion con el nucleo ESP32 real | Pasa en CI (`arduino:esp32:nano_nora`) |
-| Prueba en hardware | **Pendiente** |
+| Prueba en hardware | v3.0 funciona en el rover con L9110S (informado por el equipo el 2026-11-06). El mando v3.1 esta pendiente de prueba |
 
 ## Tareas inmediatas
 
-1. Cargar los dos firmwares.
-2. Confirmar el puente H instalado. El firmware usa L298N por defecto, tomado del ultimo commit del equipo. Los documentos anteriores decian L9110S.
-3. Recablear el ejecutor segun el esquematico: los pines del firmware anterior no eran validos para esta placa.
+1. Probar en el rover el mando v3.1: direccion sola sin movimiento, `A`/`D` + `W`/`S`, y pivote con `Q`/`E` + `W`/`S`.
+2. Si el pivote no gira con los motores en marcha (la HMI muestra PWM aplicado distinto de cero), revisar los angulos de pivote en `calcular_consigna`: con ruedas radiales en vez de tangenciales el rover se traba.
+3. Publicar la release con la HMI como ejecutable.
 4. Confirmar el modelo de servo. Determina la corriente del riel de servos: MG996R requiere un regulador de al menos 10 A.
-5. Revisar en banco el sentido de giro (`INVERTIR_IZQ`, `INVERTIR_DER`) y la calibracion de pulsos (`SERVO_TICKS_0`, `SERVO_TICKS_180`).
-6. Seguir la tabla de diagnostico del esquematico y anotar aca si persisten los brownouts.
+5. Vigilar la temperatura del L9110S con 3 motores por canal, sobre todo en rampa.
+6. Si vuelven los reinicios, seguir la tabla de diagnostico del esquematico y anotarlo aca.
 
 ## Problema de reinicios del ejecutor
 

@@ -15,6 +15,25 @@ Un solo archivo activo por pieza, editado en el lugar. Los experimentos van en r
 
 ## Historial de Versiones
 
+### [v3.1] - 2026-11-06 (logica verificada en PC, mando pendiente de prueba en el rover)
+
+#### HMI
+- Direccion y traccion separadas. `A`, `D`, `Q` y `E` solo orientan las ruedas y no mueven los motores. Solo `W` y `S` mueven los motores, sobre la orientacion elegida.
+- Pivote: `Q` + `W` gira en el lugar a la izquierda, `E` + `W` a la derecha. Con `S`, al reves.
+- `W` y `S` juntas se anulan. Prioridad de direccion: `Q`, `E`, `A`, `D`.
+- La etiqueta del mando combina traccion y direccion (por ejemplo `AVANCE + IZQUIERDA`).
+
+#### Firmware
+- Ejecutor: L9110S pasa a ser el puente H por defecto (`PUENTE_H_L298N 0`), porque es el montado en el rover. L298N sigue disponible y se puede elegir al compilar.
+- Sin cambios de protocolo: los firmwares siguen informando v3.0 y son compatibles con esta HMI.
+
+#### Pruebas
+- El banco de firmware compila el ejecutor en las dos variantes de puente H. Pruebas nuevas para L9110S: pines por sentido, pivote, rampa e inversion por cero sin activar los dos pines a la vez.
+- Pruebas de cinematica reescritas para el mando nuevo.
+
+#### Estado
+- v3.0 probada en el rover por el equipo: funciona con L9110S.
+
 ### [v3.0] - 2026-11-02 (compila y logica verificada en PC, pendiente de hardware)
 
 #### Reorganizacion

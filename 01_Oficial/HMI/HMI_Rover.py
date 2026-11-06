@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""HMI de pilotaje del Rover Lunar (v3.0).
+"""HMI de pilotaje del Rover Lunar (v3.1).
 
 Se conecta por USB al Arduino Nano ESP32 transmisor y muestra:
   - Lo transmitido (consigna, secuencia y tasa de envio).
@@ -30,8 +30,8 @@ try:
 except ImportError:
     tk = None
 
-VERSION_HMI = "v3.0"
-VERSION_FIRMWARE = "v3.0"
+VERSION_HMI = "v3.1"
+VERSION_FIRMWARE = "v3.0"  # Version del protocolo de las placas
 BAUDIOS = 115200
 PERIODO_ENVIO_S = 0.05  # 20 Hz. El transmisor frena si deja de recibir durante 500 ms
 TELEMETRIA_VIGENTE_S = 1.0
@@ -124,38 +124,58 @@ def parsear_linea(linea):
 # =============================================================================
 def calcular_consigna(teclas, modo, pot_izq, pot_der, servos_manual, invertir_servos=False,
                       invertir_izq=False, invertir_der=False):
-    """Traduce las teclas activas en una consigna. Devuelve (etiqueta, Consigna)."""
+    """Traduce las teclas activas en una consigna. Devuelve (etiqueta, Consigna).
+
+    Direccion y traccion van separadas:
+      - A, D, Q y E solo orientan las ruedas. Por si solas no mueven los motores.
+      - W y S son las unicas que mueven los motores: avance y reversa sobre la
+        orientacion elegida. W y S juntas se anulan.
+      - Q + W gira en el lugar hacia la izquierda y E + W hacia la derecha. Con S, al reves.
+    Prioridad de direccion si hay varias apretadas: Q, E, A, D.
+    """
     centro = (ANGULO_CENTRO,) * 4
-    reposo = tuple(servos_manual) if modo == "MANUAL" else centro
 
     def orientar(angulos):
         if modo == "MANUAL":
             return tuple(servos_manual)
         return tuple(180 - a for a in angulos) if invertir_servos else angulos
 
-    izq, der, servos, etiqueta = 0, 0, reposo, "REPOSO"
     if teclas.get("space"):
-        etiqueta = "PARADA"
-    elif teclas.get("q"):
-        izq, der, servos, etiqueta = -pot_izq, pot_der, orientar((45, 135, 135, 45)), "PIVOTE IZQ"
+        return "PARADA", Consigna(0, 0, tuple(servos_manual) if modo == "MANUAL" else centro)
+
+    # Direccion: angulos de servo y factor de potencia por lado (izq, der)
+    direccion, servos, factor = None, orientar(centro), (1.0, 1.0)
+    if teclas.get("q"):
+        direccion, servos, factor = "PIVOTE IZQ", orientar((45, 135, 135, 45)), (-1.0, 1.0)
     elif teclas.get("e"):
-        izq, der, servos, etiqueta = pot_izq, -pot_der, orientar((45, 135, 135, 45)), "PIVOTE DER"
-    elif teclas.get("w"):
-        izq, der, servos, etiqueta = pot_izq, pot_der, reposo, "AVANCE"
-    elif teclas.get("s"):
-        izq, der, servos, etiqueta = -pot_izq, -pot_der, reposo, "REVERSA"
+        direccion, servos, factor = "PIVOTE DER", orientar((45, 135, 135, 45)), (1.0, -1.0)
     elif teclas.get("a"):
-        etiqueta = "IZQUIERDA"
+        direccion = "IZQUIERDA"
         if modo == "CRAB":
-            izq, der, servos = pot_izq, pot_der, orientar((135, 135, 135, 135))
+            servos = orientar((135, 135, 135, 135))
         else:
-            izq, der, servos = int(pot_izq * FACTOR_GIRO), pot_der, orientar((120, 120, 60, 60))
+            servos, factor = orientar((120, 120, 60, 60)), (FACTOR_GIRO, 1.0)
     elif teclas.get("d"):
-        etiqueta = "DERECHA"
+        direccion = "DERECHA"
         if modo == "CRAB":
-            izq, der, servos = pot_izq, pot_der, orientar((45, 45, 45, 45))
+            servos = orientar((45, 45, 45, 45))
         else:
-            izq, der, servos = pot_izq, int(pot_der * FACTOR_GIRO), orientar((60, 60, 120, 120))
+            servos, factor = orientar((60, 60, 120, 120)), (1.0, FACTOR_GIRO)
+
+    # Traccion: solo W y S
+    sentido = (1 if teclas.get("w") else 0) - (1 if teclas.get("s") else 0)
+    traccion = {1: "AVANCE", -1: "REVERSA"}.get(sentido)
+    izq = int(sentido * factor[0] * pot_izq)
+    der = int(sentido * factor[1] * pot_der)
+
+    if traccion and direccion:
+        etiqueta = f"{traccion} + {direccion}"
+    elif traccion:
+        etiqueta = traccion
+    elif direccion:
+        etiqueta = f"{direccion} (detenido)"
+    else:
+        etiqueta = "REPOSO"
 
     if invertir_izq:
         izq = -izq
@@ -549,7 +569,10 @@ class HMIRover:
             b.bind("<ButtonPress-1>", lambda _, k=tecla: self._fijar_tecla(k, True))
             b.bind("<ButtonRelease-1>", lambda _, k=tecla: self._fijar_tecla(k, False))
             self.botones[tecla] = b
-        tk.Label(t_mando, text="Espacio: parada", bg=COLOR_TARJETA, fg=COLOR_TENUE, font=(FUENTE, 8)).pack()
+        ayuda = ("A D Q E orientan las ruedas sin moverse.\n"
+                 "W S mueven los motores. Combinar: A+W gira, Q+W pivota.\n"
+                 "Espacio: parada")
+        tk.Label(t_mando, text=ayuda, justify="center", bg=COLOR_TARJETA, fg=COLOR_TENUE, font=(FUENTE, 8)).pack()
 
         t_trac = tarjeta(col_c, "POTENCIA DE TRACCION (PWM)")
         t_trac.pack(fill="x", pady=(0, 8))

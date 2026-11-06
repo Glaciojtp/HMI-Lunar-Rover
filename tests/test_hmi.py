@@ -83,6 +83,10 @@ class TestCinematica(unittest.TestCase):
     def consigna(self, *activas, modo="ACKERMANN", **kw):
         return hmi.calcular_consigna(teclas(*activas), modo, 200, 100, [30, 40, 50, 60], **kw)
 
+    def motores(self, *activas, **kw):
+        c = self.consigna(*activas, **kw)[1]
+        return c.izq, c.der
+
     def test_avance_y_reversa_llevan_signo_real(self):
         self.assertEqual(self.consigna("w")[1], hmi.Consigna(200, 100))
         self.assertEqual(self.consigna("s")[1], hmi.Consigna(-200, -100))
@@ -90,21 +94,44 @@ class TestCinematica(unittest.TestCase):
     def test_reposo_centra_servos_y_para_motores(self):
         self.assertEqual(self.consigna()[1], hmi.Consigna())
 
-    def test_giro_ackermann(self):
-        _, c = self.consigna("a")
+    def test_direccion_sola_orienta_ruedas_sin_mover_motores(self):
+        for tecla, servos in (("a", (120, 120, 60, 60)), ("d", (60, 60, 120, 120)),
+                              ("q", (45, 135, 135, 45)), ("e", (45, 135, 135, 45))):
+            etiqueta, c = self.consigna(tecla)
+            self.assertEqual((c.izq, c.der, c.servos), (0, 0, servos), tecla)
+            self.assertIn("detenido", etiqueta)
+        _, c = self.consigna("a", modo="CRAB")
+        self.assertEqual((c.izq, c.der, c.servos), (0, 0, (135,) * 4))
+
+    def test_giro_ackermann_con_traccion(self):
+        _, c = self.consigna("a", "w")
         self.assertEqual((c.izq, c.der, c.servos), (140, 100, (120, 120, 60, 60)))
-        _, c = self.consigna("d")
+        _, c = self.consigna("d", "w")
         self.assertEqual((c.izq, c.der, c.servos), (200, 70, (60, 60, 120, 120)))
+        _, c = self.consigna("a", "s")
+        self.assertEqual((c.izq, c.der, c.servos), (-140, -100, (120, 120, 60, 60)))
 
-    def test_cangrejo(self):
-        self.assertEqual(self.consigna("a", modo="CRAB")[1].servos, (135,) * 4)
-        self.assertEqual(self.consigna("d", modo="CRAB")[1].servos, (45,) * 4)
+    def test_cangrejo_con_traccion(self):
+        _, c = self.consigna("a", "w", modo="CRAB")
+        self.assertEqual((c.izq, c.der, c.servos), (200, 100, (135,) * 4))
+        _, c = self.consigna("d", "s", modo="CRAB")
+        self.assertEqual((c.izq, c.der, c.servos), (-200, -100, (45,) * 4))
 
-    def test_pivote(self):
-        _, c = self.consigna("q")
+    def test_pivote_con_traccion(self):
+        etiqueta, c = self.consigna("q", "w")
         self.assertEqual((c.izq, c.der, c.servos), (-200, 100, (45, 135, 135, 45)))
-        _, c = self.consigna("e")
-        self.assertEqual((c.izq, c.der), (200, -100))
+        self.assertEqual(etiqueta, "AVANCE + PIVOTE IZQ")
+        self.assertEqual(self.motores("e", "w"), (200, -100))
+        self.assertEqual(self.motores("q", "s"), (200, -100))
+        self.assertEqual(self.motores("e", "s"), (-200, 100))
+
+    def test_w_y_s_juntas_se_anulan(self):
+        _, c = self.consigna("w", "s", "a")
+        self.assertEqual((c.izq, c.der), (0, 0))
+
+    def test_prioridad_de_direccion(self):
+        self.assertEqual(self.motores("a", "q", "w"), (-200, 100))
+        self.assertEqual(self.consigna("a", "d")[1].servos, (120, 120, 60, 60))
 
     def test_espacio_prevalece(self):
         self.assertEqual(self.consigna("w", "space")[1], hmi.Consigna())
@@ -116,6 +143,8 @@ class TestCinematica(unittest.TestCase):
         _, c = self.consigna("w", invertir_izq=True)
         self.assertEqual((c.izq, c.der), (-200, 100))
         self.assertEqual(self.consigna("a", invertir_servos=True)[1].servos, (60, 60, 120, 120))
+        _, c = self.consigna("q", "w", invertir_der=True)
+        self.assertEqual((c.izq, c.der), (-200, -100))
 
 
 class TestEstadoEnlace(unittest.TestCase):

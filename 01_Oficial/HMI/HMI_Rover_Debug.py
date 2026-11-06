@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""HMI de diagnostico del Rover Lunar (v3.0).
+"""HMI de diagnostico del Rover Lunar (v3.1).
 
 Conecta a la vez el transmisor y el ejecutor a la PC, compara trama por trama lo que se
 envia con lo que llega y lo grafica. Marca en las graficas cada reinicio del ejecutor.

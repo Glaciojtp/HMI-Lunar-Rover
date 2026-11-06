@@ -8,18 +8,18 @@ Solo necesita el cable USB a la PC. No lleva modulos externos: usa el WiFi de la
 
 | Componente | Pin del modulo | Pin del Nano ESP32 |
 |---|---|---|
-| L298N | ENA | D2 (PWM lado izquierdo) |
-| L298N | IN1 / IN2 | D3 / D4 |
-| L298N | ENB | D5 (PWM lado derecho) |
-| L298N | IN3 / IN4 | D6 / D7 |
+| L9110S | A1A (izquierda avance) | D2 |
+| L9110S | A1B (izquierda reversa) | D5 |
+| L9110S | B1A (derecha avance) | D3 |
+| L9110S | B1B (derecha reversa) | D4 |
 | PCA9685 | SDA / SCL | A4 / A5 |
 | PCA9685 | VCC (logica) | 3.3V |
 | PCA9685 | GND | GND |
 | Servos S1 a S4 | Senal | Canales 0 a 3 del PCA9685 |
 
-Quitar los jumpers de ENA y ENB del L298N: si quedan puestos, el PWM no controla la velocidad.
+El rover lleva L9110S, el valor por defecto del firmware (`PUENTE_H_L298N 0`).
 
-Con L9110S (`PUENTE_H_L298N 0`): A1A D2, A1B D5, B1A D3, B1B D4.
+Alternativa L298N (`PUENTE_H_L298N 1`): ENA D2, IN1 D3, IN2 D4, ENB D5, IN3 D6, IN4 D7. Quitar los jumpers de ENA y ENB: si quedan puestos, el PWM no controla la velocidad.
 
 ## Alimentacion: tres rieles con masa en estrella
 
@@ -45,7 +45,7 @@ Son valores de referencia. Confirmar con la hoja de datos de los componentes mon
 |---|---|---|
 | 4 servos MG996R | Hasta unos 2.5 A cada uno en bloqueo: 10 A en total | Un LM2596 (3 A) no alcanza. Usar buck o UBEC de al menos 10 A |
 | 4 servos MG90S | Hasta unos 0.7 A cada uno en bloqueo: menos de 3 A | Un buck de 5 A da margen |
-| 3 motores amarillos por canal | Cerca de 1 A o mas cada uno al arrancar o bloquearse | Puede superar los 2 A por canal del L298N. Si calienta o se corta, usar un puente H de mas corriente |
+| 3 motores amarillos por canal | Cerca de 1 A o mas cada uno al arrancar o bloquearse | El L9110S admite unos 0,8 A continuos por canal (2 A de pico). Con 3 motores por canal queda justo: si calienta, se corta o el rover pierde fuerza en rampa, usar un puente H de mas corriente |
 
 ## Diagnostico de reinicios con la HMI debug
 

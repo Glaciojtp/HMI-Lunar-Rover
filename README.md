@@ -4,10 +4,10 @@
 
 **Rover de exploración Rocker-Bogie 6x6 con dirección en las 4 esquinas, manejado desde una PC por WiFi**
 
-![Versión](https://img.shields.io/badge/versi%C3%B3n-v3.0-2a78d6)
+![Versión](https://img.shields.io/badge/versi%C3%B3n-v3.1-2a78d6)
 ![Pruebas en PC](https://img.shields.io/badge/pruebas%20en%20PC-pasan-1baf7a)
 ![Compilación ESP32](https://img.shields.io/badge/compilaci%C3%B3n%20ESP32-pasa-1baf7a)
-![Hardware](https://img.shields.io/badge/validaci%C3%B3n%20en%20hardware-pendiente-eda100)
+![Hardware](https://img.shields.io/badge/prueba%20en%20el%20rover-funciona-1baf7a)
 
 [Estado actual](#estado-actual) ·
 [Cómo funciona](#cómo-funciona) ·
@@ -24,12 +24,12 @@
 
 ## Estado actual
 
-*Actualizado: 2 de noviembre de 2026.*
+*Actualizado: 6 de noviembre de 2026.*
 
-La versión **v3.0** reorganiza todo el proyecto y ataca los reinicios del ejecutor por software. La lógica está probada en PC y los firmwares compilan para ESP32, pero **todavía no se probó en el rover**.
+La **v3.0** reorganizó el proyecto y atacó los reinicios del ejecutor por software. **Ya se probó en el rover y funciona**, con puente H **L9110S**. La **v3.1** separa dirección y tracción en el mando: las teclas de dirección solo orientan las ruedas y solo `W` y `S` mueven los motores.
 
 > [!IMPORTANT]
-> El problema que está abierto es el reinicio del ejecutor por picos de corriente. El firmware nuevo reduce los picos e informa la causa de cada reinicio, pero hasta medir en el rover no se puede afirmar que estén resueltos. La alimentación se sigue revisando.
+> El firmware reduce los picos de corriente e informa la causa de cada reinicio. Si el ejecutor vuelve a reiniciarse, la HMI lo avisa y la HMI debug muestra la causa. La alimentación se sigue revisando.
 
 ### Qué está listo y qué falta
 
@@ -37,19 +37,17 @@ La versión **v3.0** reorganiza todo el proyecto y ataca los reinicios del ejecu
 |---|---|---|
 | Organización del repositorio | **Listo** | Un solo archivo activo por pieza. Lo anterior está archivado |
 | Lógica de los firmwares | **Probada en PC** | Se ejecutan los `.ino` reales con hardware simulado |
-| HMI normal y HMI debug | **Probadas en PC** | Con puertos simulados en Windows. Falta probarlas con las placas |
+| HMI normal y HMI debug | **Funcionan** | Usadas con las placas reales |
 | Compilación para ESP32 | **Lista** | Los dos firmwares compilan en el CI con el paquete Arduino ESP32 Boards |
-| Prueba en el rover | **Pendiente** | Falta recablear el ejecutor y hacer el diagnóstico en banco |
+| Prueba en el rover | **Funciona** | Probado por el equipo con L9110S. El mando de la v3.1 falta probarlo en el rover |
 | Alimentación | **En revisión** | Ver [Alimentación y reinicios](#alimentación-y-reinicios) |
 
 ### Próximos pasos
 
-1. Cargar los dos firmwares.
-2. Confirmar qué **puente H** está montado. El firmware viene para L298N, pero los documentos anteriores decían L9110S.
-3. Recablear el ejecutor: **los pines cambiaron** respecto de las versiones anteriores.
-4. Confirmar el **modelo de servo**, porque define el regulador necesario.
-5. Revisar en banco el sentido de giro y la calibración de los servos.
-6. Hacer el [diagnóstico de reinicios](03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md#diagnostico-de-reinicios-con-la-hmi-debug) con la HMI debug.
+1. Probar en el rover el mando nuevo de la v3.1, sobre todo el pivote (`Q` o `E` más `W`).
+2. Publicar una release con la HMI como ejecutable, para usarla sin instalar Python.
+3. Ensayos en rampa a 20 grados (CEPIT) y en terreno natural (Sierra).
+4. Si aparecen reinicios, hacer el [diagnóstico](03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md#diagnostico-de-reinicios-con-la-hmi-debug) con la HMI debug.
 
 ---
 
@@ -149,10 +147,17 @@ Muestra lo transmitido, lo aplicado en el ejecutor y estas señales de conexión
 
 **Controles**
 
-| Tecla | Acción | Tecla | Acción |
+Dirección y tracción están separadas. Las teclas de dirección **solo orientan las ruedas**: el rover no se mueve hasta apretar `W` o `S`. Para andar se combinan.
+
+| Tecla | Qué hace sola | Con `W` | Con `S` |
 |---|---|---|---|
-| `W` / `S` | Avance / reversa | `Q` / `E` | Pivote a la izquierda / derecha |
-| `A` / `D` | Giro (lateral en modo CRAB) | `Espacio` | Parada |
+| `W` / `S` | Avanza / retrocede derecho | | |
+| `A` / `D` | Dobla las ruedas a la izquierda / derecha (en CRAB, todas hacia el costado) | Avanza girando | Retrocede girando |
+| `Q` | Pone las ruedas en posición de pivote | Gira en el lugar a la izquierda | Gira en el lugar a la derecha |
+| `E` | Pone las ruedas en posición de pivote | Gira en el lugar a la derecha | Gira en el lugar a la izquierda |
+| `Espacio` | Parada | | |
+
+`W` y `S` juntas se anulan. Si hay varias teclas de dirección apretadas, manda `Q`, después `E`, `A` y `D`. Para combinar hay que usar el teclado: con el mouse se aprieta un solo botón a la vez.
 
 Modos de conducción: **ACKERMANN**, **CRAB** y **MANUAL** (servos por slider).
 
@@ -189,7 +194,7 @@ arduino-cli compile --fqbn arduino:esp32:nano_nora --upload -p COMx 01_Oficial/T
 arduino-cli compile --fqbn arduino:esp32:nano_nora --upload -p COMy 01_Oficial/Ejecutor_NanoESP32
 ```
 
-El firmware viene para **L298N**. Para **L9110S**, poner `#define PUENTE_H_L298N 0` en `Ejecutor_NanoESP32.ino`.
+El firmware viene para **L9110S**, el puente H montado en el rover. Para **L298N**, poner `#define PUENTE_H_L298N 1` en `Ejecutor_NanoESP32.ino`.
 
 ### 2. Cablear el ejecutor
 
@@ -197,8 +202,10 @@ El transmisor no lleva módulos externos, solo el cable USB.
 
 | Componente | Señal | Pin del Nano ESP32 |
 |---|---|---|
-| L298N, lado izquierdo | ENA / IN1 / IN2 | D2 / D3 / D4 |
-| L298N, lado derecho | ENB / IN3 / IN4 | D5 / D6 / D7 |
+| L9110S, lado izquierdo | A1A (avance) / A1B (reversa) | D2 / D5 |
+| L9110S, lado derecho | B1A (avance) / B1B (reversa) | D3 / D4 |
+| L298N (alternativa), lado izquierdo | ENA / IN1 / IN2 | D2 / D3 / D4 |
+| L298N (alternativa), lado derecho | ENB / IN3 / IN4 | D5 / D6 / D7 |
 | PCA9685 | SDA / SCL | A4 / A5 |
 | Servos S1 / S2 / S3 / S4 | Señal | Canales 0 / 1 / 2 / 3 del PCA9685 |
 
