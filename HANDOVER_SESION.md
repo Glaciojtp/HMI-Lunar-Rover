@@ -19,8 +19,14 @@ Ultima actualizacion: 2026-11-06.
 2. Si el pivote no gira con los motores en marcha (la HMI muestra PWM aplicado distinto de cero), revisar los angulos de pivote en `calcular_consigna`: con ruedas radiales en vez de tangenciales el rover se traba.
 3. Publicar la release con la HMI como ejecutable.
 4. Confirmar el modelo de servo. Determina la corriente del riel de servos: MG996R requiere un regulador de al menos 10 A.
-5. Vigilar la temperatura del L9110S con 3 motores por canal, sobre todo en rampa.
+5. Vigilar la temperatura de los L9110S en rampa: cada canal maneja un motor y admite unos 0,8 A continuos.
 6. Si vuelven los reinicios, seguir la tabla de diagnostico del esquematico y anotarlo aca.
+
+## Configuracion validada en el rover (2026-11-06)
+
+- 3 modulos L9110S dobles en paralelo: `PUENTE_H_L298N 0`, pines A1A D2, A1B D5, B1A D3, B1B D4.
+- `INVERTIR_IZQ = true` e `INVERTIR_DER = true`: con false avanzaba al reves.
+- Sintoma con `PUENTE_H_L298N 1`: 3 salidas en 0 V y solo 3 motores andando.
 
 ## Problema de reinicios del ejecutor
 

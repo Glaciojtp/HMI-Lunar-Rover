@@ -194,7 +194,7 @@ arduino-cli compile --fqbn arduino:esp32:nano_nora --upload -p COMx 01_Oficial/T
 arduino-cli compile --fqbn arduino:esp32:nano_nora --upload -p COMy 01_Oficial/Ejecutor_NanoESP32
 ```
 
-El firmware viene para **L9110S**, el puente H montado en el rover. Para **L298N**, poner `#define PUENTE_H_L298N 1` en `Ejecutor_NanoESP32.ino`.
+El firmware viene para el rover tal como está: **3 módulos L9110S dobles en paralelo** y sentido de giro invertido en los dos lados (`INVERTIR_IZQ` e `INVERTIR_DER` en `true`). Para **L298N**, poner `#define PUENTE_H_L298N 1` en `Ejecutor_NanoESP32.ino`. En esta PCB eso deja la mitad de los canales sin señal.
 
 ### 2. Cablear el ejecutor
 
@@ -202,8 +202,8 @@ El transmisor no lleva módulos externos, solo el cable USB.
 
 | Componente | Señal | Pin del Nano ESP32 |
 |---|---|---|
-| L9110S, lado izquierdo | A1A (avance) / A1B (reversa) | D2 / D5 |
-| L9110S, lado derecho | B1A (avance) / B1B (reversa) | D3 / D4 |
+| L9110S, lado izquierdo (a los 3 módulos) | A1A / A1B | D2 / D5 |
+| L9110S, lado derecho (a los 3 módulos) | B1A / B1B | D3 / D4 |
 | L298N (alternativa), lado izquierdo | ENA / IN1 / IN2 | D2 / D3 / D4 |
 | L298N (alternativa), lado derecho | ENB / IN3 / IN4 | D5 / D6 / D7 |
 | PCA9685 | SDA / SCL | A4 / A5 |

@@ -73,9 +73,10 @@ const uint8_t PIN_B1A = D3;  // Derecha avance
 const uint8_t PIN_B1B = D4;  // Derecha reversa
 #endif
 
-// Sentido de giro segun el cableado de los motores
-const bool INVERTIR_IZQ = false;
-const bool INVERTIR_DER = false;
+// Sentido de giro segun el cableado de los motores. En true, validado en el rover:
+// con false avanzaba hacia atras al pulsar adelante.
+const bool INVERTIR_IZQ = true;
+const bool INVERTIR_DER = true;
 
 // ---------------------------------------------------------------------------
 // Red

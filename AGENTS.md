@@ -66,12 +66,12 @@ HMI (PC) --USB 115200--> Nano ESP32 transmisor --WiFi UDP 4210--> Nano ESP32 eje
 
 | Funcion | Pin |
 |---|---|
-| L9110S A1A / A1B (lado izquierdo, avance / reversa) | D2 / D5 |
-| L9110S B1A / B1B (lado derecho, avance / reversa) | D3 / D4 |
+| L9110S A1A / A1B (lado izquierdo) | D2 / D5 |
+| L9110S B1A / B1B (lado derecho) | D3 / D4 |
 | PCA9685 SDA / SCL | A4 / A5 |
 | Servos S1 / S2 / S3 / S4 | Canales 0 / 1 / 2 / 3 del PCA9685 |
 
-El rover lleva L9110S, que es el valor por defecto (`PUENTE_H_L298N 0`). Con `PUENTE_H_L298N 1` el firmware usa L298N: ENA/IN1/IN2 en D2/D3/D4 y ENB/IN3/IN4 en D5/D6/D7. Las pruebas compilan las dos variantes.
+El rover lleva 3 modulos L9110S dobles comandados en paralelo, que es el valor por defecto (`PUENTE_H_L298N 0`), con `INVERTIR_IZQ` e `INVERTIR_DER` en `true` (validado en el rover). Con `PUENTE_H_L298N 1` el firmware usa L298N: ENA/IN1/IN2 en D2/D3/D4 y ENB/IN3/IN4 en D5/D6/D7. Las pruebas compilan las dos variantes.
 
 Los GPIO 14, 25, 26, 27, 32 y 33 de versiones anteriores son numeracion de ESP32 clasico. No usarlos en esta placa.
 

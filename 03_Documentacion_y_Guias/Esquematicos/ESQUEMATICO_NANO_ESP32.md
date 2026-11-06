@@ -17,7 +17,9 @@ Solo necesita el cable USB a la PC. No lleva modulos externos: usa el WiFi de la
 | PCA9685 | GND | GND |
 | Servos S1 a S4 | Senal | Canales 0 a 3 del PCA9685 |
 
-El rover lleva L9110S, el valor por defecto del firmware (`PUENTE_H_L298N 0`).
+El rover lleva 3 modulos L9110S dobles, uno por par de motores, comandados en paralelo: cada una de las 4 senales (A1A, A1B, B1A, B1B) llega a los 3 modulos. Es el valor por defecto del firmware (`PUENTE_H_L298N 0`). Con ese cableado el sentido de marcha queda bien con `INVERTIR_IZQ = true` e `INVERTIR_DER = true`.
+
+Con `PUENTE_H_L298N 1` el firmware usa D6 y D7 y modula solo D2 y D5: en esta PCB eso deja la mitad de los canales sin senal.
 
 Alternativa L298N (`PUENTE_H_L298N 1`): ENA D2, IN1 D3, IN2 D4, ENB D5, IN3 D6, IN4 D7. Quitar los jumpers de ENA y ENB: si quedan puestos, el PWM no controla la velocidad.
 
@@ -45,7 +47,7 @@ Son valores de referencia. Confirmar con la hoja de datos de los componentes mon
 |---|---|---|
 | 4 servos MG996R | Hasta unos 2.5 A cada uno en bloqueo: 10 A en total | Un LM2596 (3 A) no alcanza. Usar buck o UBEC de al menos 10 A |
 | 4 servos MG90S | Hasta unos 0.7 A cada uno en bloqueo: menos de 3 A | Un buck de 5 A da margen |
-| 3 motores amarillos por canal | Cerca de 1 A o mas cada uno al arrancar o bloquearse | El L9110S admite unos 0,8 A continuos por canal (2 A de pico). Con 3 motores por canal queda justo: si calienta, se corta o el rover pierde fuerza en rampa, usar un puente H de mas corriente |
+| 6 motores amarillos, uno por canal de L9110S | Cerca de 1 A o mas cada uno al arrancar o bloquearse | El L9110S admite unos 0,8 A continuos por canal (2 A de pico). Alcanza en llano. Si en rampa un modulo calienta o se corta, hace falta un puente H de mas corriente |
 
 ## Diagnostico de reinicios con la HMI debug
 

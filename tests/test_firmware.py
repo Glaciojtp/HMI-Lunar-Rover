@@ -21,6 +21,17 @@ BANCO = RAIZ / "tests/banco_firmware"
 ENA, IN1, IN2, ENB = 2, 3, 4, 5              # L298N (PUENTE_H_L298N=1)
 A1A, A1B, B1A, B1B = 2, 5, 3, 4              # L9110S (por defecto)
 L298N = ("PUENTE_H_L298N=1",)
+
+
+def constante_bool(nombre):
+    return re.search(rf"const bool {nombre} = (true|false);", INO_RX.read_text(encoding="utf-8")).group(1) == "true"
+
+
+# Pin que recibe una consigna positiva (avance) y negativa (reversa), segun la inversion del firmware
+INV_IZQ, INV_DER = constante_bool("INVERTIR_IZQ"), constante_bool("INVERTIR_DER")
+IZQ_AV, IZQ_REV = (A1B, A1A) if INV_IZQ else (A1A, A1B)
+DER_AV, DER_REV = (B1B, B1A) if INV_DER else (B1A, B1B)
+IN_AV_IZQ, IN_REV_IZQ = (IN2, IN1) if INV_IZQ else (IN1, IN2)
 ARRANQUE_MS = 1700
 
 
@@ -130,7 +141,7 @@ class TestEjecutor(unittest.TestCase):
         ev = ejecutar(INO_RX, guion, L298N)
         eventos_pwm = pwm(ev, ENA)
         ultimo_cero = max(t for t, v in eventos_pwm if v == 0)
-        t_rev = next(t for t, e in ev if e == f"DW {IN2} 1")
+        t_rev = next(t for t, e in ev if e == f"DW {IN_REV_IZQ} 1")
         cero_previo = max(t for t, v in eventos_pwm if v == 0 and t < t_rev)
         self.assertGreaterEqual(t_rev - cero_previo, 80)
         self.assertLessEqual(ultimo_cero, t_rev)
@@ -304,12 +315,12 @@ class TestEjecutorL9110S(unittest.TestCase):
 
     def test_cada_sentido_sale_por_su_pin(self):
         ev = ejecutar(INO_RX, ejecutor_operando(*stream(1, 60, izq=150, der=-100)))
-        self.assertEqual([self.ultimo(ev, p) for p in (A1A, A1B, B1A, B1B)], [150, 0, 0, 100])
+        self.assertEqual([self.ultimo(ev, p) for p in (IZQ_AV, IZQ_REV, DER_AV, DER_REV)], [150, 0, 0, 100])
 
     def test_pivote_mueve_los_dos_lados_en_sentidos_opuestos(self):
         ev = ejecutar(INO_RX, ejecutor_operando(*stream(1, 60, izq=-200, der=200, servos=(45, 135, 135, 45))))
-        self.assertEqual([self.ultimo(ev, p) for p in (A1A, A1B, B1A, B1B)], [0, 200, 200, 0])
-        for pin in (A1B, B1A):
+        self.assertEqual([self.ultimo(ev, p) for p in (IZQ_AV, IZQ_REV, DER_AV, DER_REV)], [0, 200, 200, 0])
+        for pin in (IZQ_REV, DER_AV):
             valores = [v for _, v in pwm(ev, pin)]
             for a, b in zip(valores, valores[1:]):
                 self.assertLessEqual(abs(b - a), 4)
@@ -320,19 +331,19 @@ class TestEjecutorL9110S(unittest.TestCase):
         hubo_avance = False
         t_cero = t_rev = None
         for t, e in ev:
-            if e.startswith(f"PWM {A1A} "):
+            if e.startswith(f"PWM {IZQ_AV} "):
                 avance = int(e.split()[2])
                 hubo_avance = hubo_avance or avance > 0
                 if avance == 0 and hubo_avance and t_cero is None:
                     t_cero = t
-            elif e.startswith(f"PWM {A1B} "):
+            elif e.startswith(f"PWM {IZQ_REV} "):
                 reversa = int(e.split()[2])
                 if reversa > 0 and t_rev is None:
                     t_rev = t
             self.assertFalse(avance > 0 and reversa > 0)
         self.assertIsNotNone(t_cero)
         self.assertGreaterEqual(t_rev - t_cero, 80)
-        self.assertEqual(self.ultimo(ev, A1B), 120)
+        self.assertEqual(self.ultimo(ev, IZQ_REV), 120)
 
 
 @unittest.skipUnless(shutil.which("g++"), "Requiere g++")
@@ -350,7 +361,7 @@ class TestExtremoAExtremo(unittest.TestCase):
         ev_rx = ejecutar(INO_RX, guion_rx, L298N)
         self.assertEqual(pwm(ev_rx, ENA)[-1][1], 180)
         self.assertEqual(pwm(ev_rx, ENB)[-1][1], 90)
-        self.assertIn(f"DW {IN1} 1", [e for _, e in ev_rx])
+        self.assertIn(f"DW {IN_AV_IZQ} 1", [e for _, e in ev_rx])
         ultima_rx = seriales(ev_rx, "RX,")[-1].split(",")
         self.assertEqual(ultima_rx[2:8], ["180", "-90", "120", "120", "60", "60"])
 

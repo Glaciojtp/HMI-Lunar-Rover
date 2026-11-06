@@ -24,11 +24,12 @@ Un solo archivo activo por pieza, editado en el lugar. Los experimentos van en r
 - La etiqueta del mando combina traccion y direccion (por ejemplo `AVANCE + IZQUIERDA`).
 
 #### Firmware
-- Ejecutor: L9110S pasa a ser el puente H por defecto (`PUENTE_H_L298N 0`), porque es el montado en el rover. L298N sigue disponible y se puede elegir al compilar.
+- Ejecutor: L9110S pasa a ser el puente H por defecto (`PUENTE_H_L298N 0`): la PCB tiene 3 modulos dobles en paralelo. Con L298N quedaban 3 salidas en 0 V. L298N sigue disponible y se puede elegir al compilar.
+- Ejecutor: `INVERTIR_IZQ` e `INVERTIR_DER` en true, validado en el rover (con false avanzaba al reves).
 - Sin cambios de protocolo: los firmwares siguen informando v3.0 y son compatibles con esta HMI.
 
 #### Pruebas
-- El banco de firmware compila el ejecutor en las dos variantes de puente H. Pruebas nuevas para L9110S: pines por sentido, pivote, rampa e inversion por cero sin activar los dos pines a la vez.
+- El banco de firmware compila el ejecutor en las dos variantes de puente H y toma la inversion de giro del propio `.ino`. Pruebas nuevas para L9110S: pines por sentido, pivote, rampa e inversion por cero sin activar los dos pines a la vez.
 - Pruebas de cinematica reescritas para el mando nuevo.
 
 #### Estado
