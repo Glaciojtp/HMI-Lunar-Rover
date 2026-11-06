@@ -17,7 +17,7 @@ Ultima actualizacion: 2026-11-06.
 
 1. Probar en el rover el mando v3.1: direccion sola sin movimiento, `A`/`D` + `W`/`S`, y pivote con `Q`/`E` + `W`/`S`.
 2. Si el pivote no gira con los motores en marcha (la HMI muestra PWM aplicado distinto de cero), revisar los angulos de pivote en `calcular_consigna`: con ruedas radiales en vez de tangenciales el rover se traba.
-3. Publicar la release v3.1 con `.github/workflows/release.yml` (ver `AGENTS.md`).
+3. Release v3.1 publicada a mano el 2026-11-06 (Actions bloqueado por un problema de facturacion de la cuenta). Cuando se destrabe, las siguientes las arma `.github/workflows/release.yml`.
 4. Confirmar el modelo de servo. Determina la corriente del riel de servos: MG996R requiere un regulador de al menos 10 A.
 5. Vigilar la temperatura de los L9110S en rampa: cada canal maneja un motor y admite unos 0,8 A continuos.
 6. Si vuelven los reinicios, seguir la tabla de diagnostico del esquematico y anotarlo aca.

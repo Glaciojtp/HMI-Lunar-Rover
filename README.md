@@ -31,7 +31,7 @@ En la [última release](https://github.com/Glaciojtp/HMI-Lunar-Rover/releases/la
 |---|---|
 | [`HMI_Rover.exe`](https://github.com/Glaciojtp/HMI-Lunar-Rover/releases/latest/download/HMI_Rover.exe) | Manejar el rover. Es lo único que hace falta si las placas ya están cargadas |
 | [`HMI_Rover_Debug.exe`](https://github.com/Glaciojtp/HMI-Lunar-Rover/releases/latest/download/HMI_Rover_Debug.exe) | Banco de pruebas con las dos placas conectadas a la PC |
-| `Transmisor_NanoESP32.bin`, `Ejecutor_NanoESP32.bin` | Firmwares compilados, para recargar las placas sin compilar |
+| `Firmwares_NanoESP32.zip` | Opcional. Los dos firmwares, para volver a grabar las placas con Arduino IDE. Las placas del rover ya tienen la última versión |
 
 1. Descargar `HMI_Rover.exe` y abrirlo. Windows puede avisar que es un programa no firmado: **Más información** y después **Ejecutar de todas formas**.
 2. Encender el rover y conectar el transmisor por USB.

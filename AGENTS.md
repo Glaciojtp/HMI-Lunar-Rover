@@ -137,6 +137,8 @@ Una release publica `HMI_Rover.exe`, `HMI_Rover_Debug.exe` y los `.bin` de los d
 
 En cada PR que toque `01_Oficial/` el mismo workflow genera los archivos sin publicarlos, para verificar que compilan.
 
+Si Actions no esta disponible, la release se arma a mano: los `.exe` con PyInstaller (mismos comandos que el workflow) y los firmwares como `.zip` con las dos carpetas de sketch, subidos con `gh release create`.
+
 ---
 
 ## 7. Equipo
