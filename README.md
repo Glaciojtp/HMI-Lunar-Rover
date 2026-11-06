@@ -9,6 +9,7 @@
 ![Compilación ESP32](https://img.shields.io/badge/compilaci%C3%B3n%20ESP32-pasa-1baf7a)
 ![Hardware](https://img.shields.io/badge/prueba%20en%20el%20rover-funciona-1baf7a)
 
+[Descargar](#descargar-sin-instalar-nada) ·
 [Estado actual](#estado-actual) ·
 [Cómo funciona](#cómo-funciona) ·
 [Conexión](#cómo-se-hace-la-conexión) ·
@@ -19,6 +20,22 @@
 *Equipo CEPIT: Joaquín, Lucas, Lucio, Sebastián, Emir, Benjamín, Keila y Ainsworth*
 
 </div>
+
+---
+
+## Descargar sin instalar nada
+
+En la [última release](https://github.com/Glaciojtp/HMI-Lunar-Rover/releases/latest) están los programas listos para Windows. No hace falta instalar Python ni ninguna biblioteca.
+
+| Archivo | Para qué |
+|---|---|
+| [`HMI_Rover.exe`](https://github.com/Glaciojtp/HMI-Lunar-Rover/releases/latest/download/HMI_Rover.exe) | Manejar el rover. Es lo único que hace falta si las placas ya están cargadas |
+| [`HMI_Rover_Debug.exe`](https://github.com/Glaciojtp/HMI-Lunar-Rover/releases/latest/download/HMI_Rover_Debug.exe) | Banco de pruebas con las dos placas conectadas a la PC |
+| `Transmisor_NanoESP32.bin`, `Ejecutor_NanoESP32.bin` | Firmwares compilados, para recargar las placas sin compilar |
+
+1. Descargar `HMI_Rover.exe` y abrirlo. Windows puede avisar que es un programa no firmado: **Más información** y después **Ejecutar de todas formas**.
+2. Encender el rover y conectar el transmisor por USB.
+3. Elegir el puerto, tocar **CONECTAR** y manejar con el teclado ([controles](#hmi-normal)).
 
 ---
 
@@ -45,9 +62,8 @@ La **v3.0** reorganizó el proyecto y atacó los reinicios del ejecutor por soft
 ### Próximos pasos
 
 1. Probar en el rover el mando nuevo de la v3.1, sobre todo el pivote (`Q` o `E` más `W`).
-2. Publicar una release con la HMI como ejecutable, para usarla sin instalar Python.
-3. Ensayos en rampa a 20 grados (CEPIT) y en terreno natural (Sierra).
-4. Si aparecen reinicios, hacer el [diagnóstico](03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md#diagnostico-de-reinicios-con-la-hmi-debug) con la HMI debug.
+2. Ensayos en rampa a 20 grados (CEPIT) y en terreno natural (Sierra).
+3. Si aparecen reinicios, hacer el [diagnóstico](03_Documentacion_y_Guias/Esquematicos/ESQUEMATICO_NANO_ESP32.md#diagnostico-de-reinicios-con-la-hmi-debug) con la HMI debug.
 
 ---
 

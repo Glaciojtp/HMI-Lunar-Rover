@@ -1,0 +1,89 @@
+name: Release
+
+# En cada PR que toque las piezas activas: genera los ejecutables y los binarios para verificarlos.
+# Al subir una etiqueta v*: ademas crea la release como borrador con todos los archivos adjuntos.
+
+on:
+  push:
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '01_Oficial/**'
+      - '.github/workflows/release.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  hmi:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pyserial pyinstaller
+      - name: Ejecutables de las dos HMI (Python, Tkinter y pyserial incluidos)
+        shell: bash
+        run: |
+          python -m PyInstaller --clean --noconsole --onefile --name HMI_Rover \
+            --distpath salida 01_Oficial/HMI/HMI_Rover.py
+          python -m PyInstaller --clean --noconsole --onefile --name HMI_Rover_Debug \
+            --paths 01_Oficial/HMI --distpath salida 01_Oficial/HMI/HMI_Rover_Debug.py
+      - name: Cada ejecutable arranca y sigue abierto (un modulo faltante lo cierra al iniciar)
+        shell: pwsh
+        run: |
+          foreach ($exe in 'HMI_Rover', 'HMI_Rover_Debug') {
+            $p = Start-Process -FilePath "salida\$exe.exe" -PassThru
+            Start-Sleep -Seconds 15
+            if ($p.HasExited) { throw "$exe se cerro al arrancar (codigo $($p.ExitCode))" }
+            Stop-Process -Id $p.Id -Force
+            Write-Host "$exe arranca correctamente"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hmi
+          path: salida/*.exe
+
+  firmware:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Nucleo y biblioteca
+        run: |
+          arduino-cli core update-index
+          arduino-cli core install arduino:esp32
+          arduino-cli lib install "Adafruit PWM Servo Driver Library"
+      - name: Binarios de los dos firmwares
+        run: |
+          mkdir -p salida
+          for sketch in Transmisor_NanoESP32 Ejecutor_NanoESP32; do
+            arduino-cli compile --fqbn arduino:esp32:nano_nora --output-dir "build/$sketch" "01_Oficial/$sketch"
+            cp "build/$sketch/$sketch.ino.bin" "salida/$sketch.bin"
+          done
+          ls -l salida
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: salida/*.bin
+
+  publicar:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [ hmi, firmware ]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: archivos
+          merge-multiple: true
+      - name: Crear la release como borrador
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" archivos/* \
+            --repo "$GITHUB_REPOSITORY" --draft --title "Rover Lunar $GITHUB_REF_NAME" \
+            --notes "Notas pendientes de completar antes de publicar."

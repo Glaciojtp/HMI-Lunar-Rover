@@ -127,6 +127,16 @@ arduino-cli compile --fqbn arduino:esp32:nano_nora 01_Oficial/Ejecutor_NanoESP32
 - `tests/banco_firmware/stubs/` debe seguir la API real de Arduino. Si el firmware usa una funcion nueva, agregarla con la misma firma.
 - Las pruebas de interfaz requieren Tkinter y se omiten donde no este (por ejemplo, WSL sin `python3-tk`).
 
+### Release
+
+Una release publica `HMI_Rover.exe`, `HMI_Rover_Debug.exe` y los `.bin` de los dos firmwares, para usar el rover sin instalar nada. La arma `.github/workflows/release.yml`:
+
+1. Con todo unido en `main`, actualizar `CHANGELOG.md` y la version en `HMI_Rover.py` (y `VERSION_FW` si cambio el protocolo).
+2. `git tag vX.Y` en `main` y `git push origin vX.Y`.
+3. El workflow compila, prueba que cada `.exe` arranque y crea la release como **borrador**. Completar las notas desde el `CHANGELOG.md` y publicarla.
+
+En cada PR que toque `01_Oficial/` el mismo workflow genera los archivos sin publicarlos, para verificar que compilan.
+
 ---
 
 ## 7. Equipo

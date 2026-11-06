@@ -32,6 +32,10 @@ Un solo archivo activo por pieza, editado en el lugar. Los experimentos van en r
 - El banco de firmware compila el ejecutor en las dos variantes de puente H y toma la inversion de giro del propio `.ino`. Pruebas nuevas para L9110S: pines por sentido, pivote, rampa e inversion por cero sin activar los dos pines a la vez.
 - Pruebas de cinematica reescritas para el mando nuevo.
 
+#### Release
+- `.github/workflows/release.yml`: al subir una etiqueta `v*` genera `HMI_Rover.exe`, `HMI_Rover_Debug.exe` y los `.bin` de los firmwares, verifica que cada `.exe` arranque y crea la release como borrador. En los PR solo genera los archivos.
+- README: seccion para descargar y usar el rover sin instalar nada.
+
 #### Estado
 - v3.0 probada en el rover por el equipo: funciona con L9110S.
 
