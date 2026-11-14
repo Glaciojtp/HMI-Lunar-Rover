@@ -30,13 +30,13 @@ Ultima actualizacion: 2026-11-06.
 
 ## Riesgo abierto: alimentacion del Nano ejecutor (2026-11-14)
 
-El Nano ejecutor se alimenta por VIN con una pila aparte de unos 4 V. VIN pide 6 a 21 V: anda sin margen y en los picos del WiFi puede reiniciarse por brownout, cada vez mas a medida que la pila se descarga. Usar 6 V o mas en VIN y unir masas. Detalle en `05_Futuro/Traccion_Escalonada/PROPUESTA_TRACCION_ESCALONADA.md`, seccion 4.
+El Nano ejecutor se alimenta por VIN con una pila aparte de unos 4 V. El PCA9685 y los puentes H tienen alimentacion propia aislada y las masas estan unidas, asi que los picos de los motores no llegan al Nano. Pero VIN pide 6 a 21 V: con 4 V anda sin margen y en los picos de su propio WiFi puede reiniciarse por brownout, cada vez mas a medida que la pila se descarga. Usar 6 V o mas en VIN. Detalle en `05_Futuro/Traccion_Escalonada/PROPUESTA_TRACCION_ESCALONADA.md`, seccion 4.
 
 Tambien confirmado: el L9110S frena los motores sin PWM (no tiene rueda libre).
 
 ## Problema de reinicios del ejecutor
 
-Causa fisica: brownout del ESP32-S3 por picos de corriente de motores y servos. Se esta revisando la alimentacion.
+Causa fisica: brownout del Arduino Nano ESP32 (su modulo u-blox NORA-W106 lleva un ESP32-S3). Se esta revisando la alimentacion.
 
 Problemas de software que los provocaban o agravaban, corregidos en v3.0:
 

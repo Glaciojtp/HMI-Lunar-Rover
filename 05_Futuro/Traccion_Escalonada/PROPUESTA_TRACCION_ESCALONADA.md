@@ -247,11 +247,13 @@ Todavía no está comprada. Lo que se elija tiene que respetar estos límites:
 
 ### Alimentación actual del Nano ejecutor: revisar ya
 
-Hoy el Nano ejecutor se alimenta por **VIN** con una pila aparte de unos **4 V**. VIN pide **6 a 21 V**: con 4 V el regulador de la placa trabaja al límite, sin margen.
+Hoy el Nano ejecutor se alimenta por **VIN** con una pila aparte de unos **4 V**. El PCA9685 y los puentes H tienen su propia alimentación, aislada, y todas las masas están unidas. El Nano solo manda señales.
+
+Ese aislamiento está bien: los picos de los motores no llegan a la alimentación del Nano. El problema que queda es el consumo **del propio Nano**, que además de mandar las señales mantiene el enlace WiFi con el transmisor. VIN pide **6 a 21 V**, y con 4 V el regulador de la placa trabaja al límite, sin margen.
 
 - **Por qué anda igual:** con poco consumo, el regulador todavía saca sus 3,3 V. Pero no hay garantía.
 - **Cuándo falla:** en los picos del WiFi (varios cientos de mA) la pila cae, la placa baja de 3,3 V y se reinicia por **brownout**, el problema que se está investigando. A medida que la pila se descarga, eso se vuelve más frecuente.
-- **La masa** de esa pila tiene que estar unida a la de motores y servos. Si no, las señales a los módulos y al PCA9685 no tienen referencia.
+- **La masa** ya está unida a la de motores y servos, como corresponde.
 
 **Lo correcto:** 6 V o más en VIN. Mientras no esté el pack 2S, sirven 2 celdas de litio en serie (7,4 V) o 4 a 6 pilas AA en serie (6 a 9 V). Con el pack 2S, el aviso de batería baja del INA226 cuida también que VIN no caiga de 6 V.
 
@@ -270,6 +272,5 @@ Hoy el Nano ejecutor se alimenta por **VIN** con una pila aparte de unos **4 V**
 ## 6. Datos que faltan
 
 1. Confirmar qué canal de cada módulo va a cada rueda (supuesto de la sección 1).
-2. Si la masa de la pila del Nano ejecutor está unida a la de motores y servos.
-3. Decidir entre relés para probar sobre la PCB actual o pasar directo a DRV8833.
-4. Batería elegida.
+2. Decidir entre relés para probar sobre la PCB actual o pasar directo a DRV8833.
+3. Batería elegida.
