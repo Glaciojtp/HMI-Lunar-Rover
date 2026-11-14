@@ -28,6 +28,12 @@ Ultima actualizacion: 2026-11-06.
 - `INVERTIR_IZQ = true` e `INVERTIR_DER = true`: con false avanzaba al reves.
 - Sintoma con `PUENTE_H_L298N 1`: 3 salidas en 0 V y solo 3 motores andando.
 
+## Riesgo abierto: alimentacion del Nano ejecutor (2026-11-14)
+
+El equipo informa que el Nano ejecutor se alimenta con una pila aparte en su pin 3.3V, no por VIN como dice el esquematico. Una celda de litio supera el maximo del ESP32-S3 (3,6 V); 2 pilas AA quedan cortas para los picos del WiFi y provocan brownouts. Pasarlo a VIN (6 a 21 V) y unir masas. Detalle en `05_Futuro/Traccion_Escalonada/PROPUESTA_TRACCION_ESCALONADA.md`, seccion 4.
+
+Tambien confirmado: el L9110S frena los motores sin PWM (no tiene rueda libre).
+
 ## Problema de reinicios del ejecutor
 
 Causa fisica: brownout del ESP32-S3 por picos de corriente de motores y servos. Se esta revisando la alimentacion.
