@@ -236,23 +236,6 @@ Todavía no está comprada. Lo que se elija tiene que respetar estos límites:
 | Nano ESP32, pin VIN | 6 a 21 V |
 | Servos | 5 a 6 V, por regulador conmutado (buck o UBEC) |
 
-### Alimentación actual del Nano ejecutor: revisar ya
-
-Hoy el Nano ejecutor se alimenta con una pila aparte, conectada a su pin de 3.3V. **Ese pin no es una entrada pensada para eso:** es la salida del regulador de la placa, y conectarle una fuente pasa por encima de todas sus protecciones.
-
-| Si la pila es | Qué pasa |
-|---|---|
-| Una celda de litio (3,7 V nominal, 4,2 V cargada) | **Supera el máximo del ESP32-S3 (3,6 V).** Puede dañar la placa |
-| 2 pilas AA o AAA (3 V o menos) | Queda por debajo de lo que necesita el WiFi en sus picos: **causa reinicios por brownout**, el problema que se está investigando |
-| Una pila de 9 V | Destruiría la placa al instante. Si la placa anda, no es este caso |
-
-Riesgos que se suman:
-
-- Si al mismo tiempo se conecta el USB, el regulador de la placa y la pila quedan enfrentados.
-- La masa de la pila tiene que estar unida a la masa de motores y servos. Si no, las señales a los módulos y al PCA9685 no tienen referencia.
-
-**Lo correcto** es alimentarlo por el pin **VIN** (6 a 21 V): desde el pack 2S propuesto, o mientras tanto desde una fuente de 6 a 12 V. La placa regula sus 3,3 V sola. Con el pack 2S, el aviso de batería baja del INA226 cuida también que VIN no caiga de 6 V.
-
 **Recomendación: pack 2S2P de celdas 18650 con BMS.** Son 7,4 V nominales (8,4 V cargado, unos 6,4 V vacío), unos 6 Ah y unos 44 Wh.
 
 - Entra en el rango de todos los componentes. Una 3S (12,6 V cargada) pasa el máximo del L9110S y del DRV8833.
@@ -262,13 +245,23 @@ Riesgos que se suman:
 
 **Duración orientativa** con las 6 ruedas, a confirmar midiendo con el INA226: unos 2 A en motores en llano, más servos y placas, da 2,5 a 3,5 horas. Cuánto agrega la tracción escalonada se sabe recién en el paso 3 del plan.
 
+### Alimentación actual del Nano ejecutor: revisar ya
+
+Hoy el Nano ejecutor se alimenta por **VIN** con una pila aparte de unos **4 V**. VIN pide **6 a 21 V**: con 4 V el regulador de la placa trabaja al límite, sin margen.
+
+- **Por qué anda igual:** con poco consumo, el regulador todavía saca sus 3,3 V. Pero no hay garantía.
+- **Cuándo falla:** en los picos del WiFi (varios cientos de mA) la pila cae, la placa baja de 3,3 V y se reinicia por **brownout**, el problema que se está investigando. A medida que la pila se descarga, eso se vuelve más frecuente.
+- **La masa** de esa pila tiene que estar unida a la de motores y servos. Si no, las señales a los módulos y al PCA9685 no tienen referencia.
+
+**Lo correcto:** 6 V o más en VIN. Mientras no esté el pack 2S, sirven 2 celdas de litio en serie (7,4 V) o 4 a 6 pilas AA en serie (6 a 9 V). Con el pack 2S, el aviso de batería baja del INA226 cuida también que VIN no caiga de 6 V.
+
 ---
 
 ## 5. Plan sugerido
 
 | Paso | Qué | Para qué |
 |---|---|---|
-| 1 | Pasar el Nano ejecutor a VIN (sección 4) | Sacar una causa posible de reinicios antes de medir nada |
+| 1 | Alimentar el Nano ejecutor con 6 V o más en VIN (sección 4) | Sacar una causa posible de reinicios antes de medir nada |
 | 2 | Sumar el INA226 sin tocar nada más | Medir el consumo real de hoy con las 6 ruedas, en llano y en rampa |
 | 3 | Sumar el segundo PCA9685 y los relés (o DRV8833), cablear sobre la PCB y poner un selector **manual** de 2, 4 o 6 ruedas | Comparar el consumo con las mediciones del paso 2 |
 | 4 | Modo automático | Solo si el paso 3 muestra ahorro |
@@ -277,6 +270,6 @@ Riesgos que se suman:
 ## 6. Datos que faltan
 
 1. Confirmar qué canal de cada módulo va a cada rueda (supuesto de la sección 1).
-2. Qué pila alimenta hoy al Nano ejecutor y si su masa está unida a la de motores y servos.
+2. Si la masa de la pila del Nano ejecutor está unida a la de motores y servos.
 3. Decidir entre relés para probar sobre la PCB actual o pasar directo a DRV8833.
 4. Batería elegida.

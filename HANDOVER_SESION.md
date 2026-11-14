@@ -30,7 +30,7 @@ Ultima actualizacion: 2026-11-06.
 
 ## Riesgo abierto: alimentacion del Nano ejecutor (2026-11-14)
 
-El equipo informa que el Nano ejecutor se alimenta con una pila aparte en su pin 3.3V, no por VIN como dice el esquematico. Una celda de litio supera el maximo del ESP32-S3 (3,6 V); 2 pilas AA quedan cortas para los picos del WiFi y provocan brownouts. Pasarlo a VIN (6 a 21 V) y unir masas. Detalle en `05_Futuro/Traccion_Escalonada/PROPUESTA_TRACCION_ESCALONADA.md`, seccion 4.
+El Nano ejecutor se alimenta por VIN con una pila aparte de unos 4 V. VIN pide 6 a 21 V: anda sin margen y en los picos del WiFi puede reiniciarse por brownout, cada vez mas a medida que la pila se descarga. Usar 6 V o mas en VIN y unir masas. Detalle en `05_Futuro/Traccion_Escalonada/PROPUESTA_TRACCION_ESCALONADA.md`, seccion 4.
 
 Tambien confirmado: el L9110S frena los motores sin PWM (no tiene rueda libre).
 
